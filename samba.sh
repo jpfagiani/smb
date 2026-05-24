@@ -2,7 +2,7 @@
 # =============================================================================
 # SERVIDOR SAMBA — DEBIAN 13 (CDPNI)
 # Script único de instalação completa
-# Versão: 6.2 — Reordenação seções, análise integração gateway-v37
+# Versão: 6.3 — Removidas opções deprecated Samba 4.22 (syslog, encrypt passwords, socket options)
 #
 # Inclui:
 #   - RAID 5 (5 discos, ~8TB úteis)
@@ -451,10 +451,8 @@ cat > /etc/samba/smb.conf << SMBEOF
 
     # Autenticação
     security             = user
-    encrypt passwords    = yes
     passdb backend       = tdbsam
     map to guest         = never
-    null passwords       = no
 
     # Rede
     interfaces           = lo ${IFACE}
@@ -468,7 +466,6 @@ cat > /etc/samba/smb.conf << SMBEOF
     smb encrypt          = off
 
     # Performance
-    socket options       = TCP_NODELAY IPTOS_LOWDELAY SO_RCVBUF=131072 SO_SNDBUF=131072
     use sendfile         = yes
     aio read size        = 16384
     aio write size       = 16384
@@ -482,7 +479,6 @@ cat > /etc/samba/smb.conf << SMBEOF
     log file             = ${LOG_SAMBA}/log.%m
     max log size         = 51200
     log level            = 1 auth:2
-    syslog               = 0
 
     # Permissões — 777 no filesystem, controle via valid users
     create mask          = 0664
