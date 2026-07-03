@@ -2021,23 +2021,21 @@ def backup_run():
             if not smb_host or not smb_share:
                 flash('Informe o IP e o nome do compartilhamento Windows.', 'error')
                 return redirect(url_for('backups_page'))
-            # Pipe tar → smbclient sem arquivo temporário local
-            tar_proc = subprocess.Popen(
-                ['sudo', tar, '-czf', '-'] + targets,
+            # Pipe tar → smbclient via bash (mais confiável que Popen duplo)
+            import shlex
+            tar_args = ' '.join(shlex.quote(t) for t in targets)
+            smb_cred = shlex.quote(f'{smb_user}%{smb_pass}')
+            smb_put  = shlex.quote(f'put - {filename}')
+            cmd = (f'sudo {tar} -czf - {tar_args}'
+                   f' | smbclient //{smb_host}/{smb_share}'
+                   f' -U {smb_cred} -c {smb_put}')
+            proc = subprocess.Popen(
+                ['bash', '-c', cmd],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 start_new_session=True
             )
-            smb_proc = subprocess.Popen(
-                ['smbclient', f'//{smb_host}/{smb_share}',
-                 '-U', f'{smb_user}%{smb_pass}',
-                 '-c', f'put - {filename}'],
-                stdin=tar_proc.stdout,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE
-            )
-            tar_proc.stdout.close()
             with open(BACKUP_INFO_FILE, 'w') as fp:
-                json.dump({'pid': tar_proc.pid, 'pid2': smb_proc.pid,
-                           'file': '', 'filename': filename,
+                json.dump({'pid': proc.pid, 'file': '', 'filename': filename,
                            'started': time.time(), 'type': 'smb'}, fp)
             flash(f'Backup SMB iniciado → \\\\{smb_host}\\{smb_share}\\{filename}', 'success')
         else:
