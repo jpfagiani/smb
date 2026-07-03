@@ -1840,23 +1840,33 @@ BACKUPS_T = BASE_T.replace("__BODY__", """
       <div id="dest-smb" style="display:none">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
           <div class="form-group">
-            <label>IP do computador</label>
-            <input type="text" name="smb_host" placeholder="192.168.1.100" style="width:100%;font-family:var(--mono);font-size:.82rem">
+            <label>IP / nome do computador</label>
+            <input type="text" id="smbHost" name="smb_host" placeholder="Cadastro-129" style="width:100%;font-family:var(--mono);font-size:.82rem">
           </div>
           <div class="form-group">
             <label>Nome do compartilhamento</label>
-            <input type="text" name="smb_share" placeholder="Backups" style="width:100%;font-family:var(--mono);font-size:.82rem">
+            <input type="text" id="smbShare" name="smb_share" placeholder="d" style="width:100%;font-family:var(--mono);font-size:.82rem">
           </div>
           <div class="form-group">
             <label>Usuário Windows</label>
-            <input type="text" name="smb_user" placeholder="seu_usuario" style="width:100%;font-family:var(--mono);font-size:.82rem">
+            <input type="text" id="smbUser" name="smb_user" placeholder="seu_usuario" style="width:100%;font-family:var(--mono);font-size:.82rem">
           </div>
           <div class="form-group">
             <label>Senha Windows</label>
-            <input type="password" name="smb_pass" placeholder="••••••" style="width:100%;font-family:var(--mono);font-size:.82rem">
+            <input type="password" id="smbPass" name="smb_pass" placeholder="••••••" style="width:100%;font-family:var(--mono);font-size:.82rem">
           </div>
         </div>
-        <small class="text-muted">O arquivo será enviado para <code>\\\\IP\\NomeDoCompartilhamento\\</code> via SMB</small>
+        <div class="form-group" style="margin-top:.25rem">
+          <label>Pasta de destino no compartilhamento</label>
+          <div style="display:flex;gap:.5rem;align-items:center">
+            <input type="text" id="smbSub" name="smb_sub" placeholder="Backups\Servidor (opcional)"
+                   style="flex:1;font-family:var(--mono);font-size:.82rem">
+            <button type="button" class="btn" onclick="smbBrowse('')" style="white-space:nowrap">
+              📂 Navegar
+            </button>
+          </div>
+          <small class="text-muted" id="smbPreview"></small>
+        </div>
       </div>
       <div class="form-group" style="margin-top:.5rem">
         <label>Incluir no backup</label>
@@ -1872,11 +1882,117 @@ BACKUPS_T = BASE_T.replace("__BODY__", """
   </div>
 </div>
 <script>
-function toggleDest(v){
-  document.getElementById('dest-local').style.display=v==='local'?'':'none';
-  document.getElementById('dest-smb').style.display=v==='smb'?'':'none';
+function toggleDest(v) {
+  document.getElementById("dest-local").style.display = v === "local" ? "" : "none";
+  document.getElementById("dest-smb").style.display   = v === "smb"   ? "" : "none";
+  updateSmbPreview();
+}
+function updateSmbPreview() {
+  var host  = (document.getElementById("smbHost")  || {}).value || "";
+  var share = (document.getElementById("smbShare") || {}).value || "";
+  var sub   = (document.getElementById("smbSub")   || {}).value || "";
+  var p = document.getElementById("smbPreview");
+  if (p && host && share)
+    p.textContent = "Destino: \\\\" + host + "\\" + share + (sub ? "\\" + sub.replace(/\//g,"\\") : "") + "\\";
+  else if (p) p.textContent = "";
+}
+["smbHost","smbShare","smbSub"].forEach(function(id) {
+  var el = document.getElementById(id);
+  if (el) el.addEventListener("input", updateSmbPreview);
+});
+
+var _smbBrowsePath = "";
+function smbBrowse(path) {
+  var host  = document.getElementById("smbHost").value.trim();
+  var share = document.getElementById("smbShare").value.trim();
+  var user  = document.getElementById("smbUser").value.trim();
+  var pass  = document.getElementById("smbPass").value;
+  if (!host || !share) { alert("Preencha o IP e o nome do compartilhamento primeiro."); return; }
+  _smbBrowsePath = path;
+  var modal = document.getElementById("mSmbBrowser");
+  if (modal) modal.classList.add("open");
+  smbLoadDir(host, share, user, pass, path);
+}
+function smbLoadDir(host, share, user, pass, path) {
+  var body = document.getElementById("smbDirBody");
+  if (body) body.innerHTML = "<tr><td colspan=2 class=text-muted>Carregando...</td></tr>";
+  fetch("{{ url_for('backup_browse') }}", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({host: host, share: share, user: user, pass: pass, path: path})
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    var bread = document.getElementById("smbBreadcrumb");
+    if (bread) {
+      var parts = path ? path.split("\\").filter(Boolean) : [];
+      var html = "<span class=text-muted style=cursor:pointer onclick=\\"smbBrowse(\\'\\')\\">\\\\\\\\"+host+"\\\\"+share+"</span>";
+      var acc = "";
+      parts.forEach(function(p) {
+        acc += (acc ? "\\\\" : "") + p;
+        var a = acc;
+        html += " \\\\ <span style=cursor:pointer onclick=\\"smbBrowse(\\'"+a+"\\')\\">"+p+"</span>";
+      });
+      bread.innerHTML = html;
+    }
+    var cur = document.getElementById("smbCurrentPath");
+    if (cur) cur.value = path;
+    if (body) {
+      if (d.error) { body.innerHTML = "<tr><td colspan=2 style=color:#c0392b>"+d.error+"</td></tr>"; return; }
+      var rows = "";
+      if (path) rows += "<tr><td><span style=cursor:pointer onclick=\\"smbBrowse(\\'"+smbParent(path)+"\\')\\">📁 ..</span></td><td></td></tr>";
+      (d.dirs||[]).forEach(function(dir) {
+        var full = path ? path+"\\\\"+dir : dir;
+        rows += "<tr><td><span style=cursor:pointer onclick=\\"smbBrowse(\\'"+full+"\\')\\">📁 "+dir+"</span></td>"
+              + "<td><button type=button class=\\"btn btn-xs btn-primary\\" onclick=\\"smbSelect(\\'"+full+"\\')\\">Selecionar</button></td></tr>";
+      });
+      if (!rows && !path) rows = "<tr><td colspan=2 class=text-muted>Nenhuma pasta encontrada</td></tr>";
+      body.innerHTML = rows || "<tr><td colspan=2 class=text-muted>Pasta vazia</td></tr>";
+    }
+  })
+  .catch(function(e) {
+    if (body) body.innerHTML = "<tr><td colspan=2 style=color:#c0392b>Erro: "+e+"</td></tr>";
+  });
+}
+function smbParent(path) {
+  var parts = path.split("\\\\").filter(Boolean);
+  parts.pop();
+  return parts.join("\\\\");
+}
+function smbSelect(path) {
+  document.getElementById("smbSub").value = path;
+  document.getElementById("mSmbBrowser").classList.remove("open");
+  updateSmbPreview();
+}
+function smbSelectCurrent() {
+  smbSelect(document.getElementById("smbCurrentPath").value || "");
 }
 </script>
+<div class="modal-bg" id="mSmbBrowser">
+  <div class="modal" style="min-width:520px;max-width:680px">
+    <div class="modal-title">
+      <h3>📂 Navegar no Compartilhamento Windows</h3>
+      <button type="button" class="modal-close" onclick="closeModal('mSmbBrowser')">&times;</button>
+    </div>
+    <div style="padding:.75rem 1rem .5rem;font-family:var(--mono);font-size:.8rem;background:var(--bg3);border-bottom:1px solid var(--border)">
+      <span id="smbBreadcrumb" class="text-muted">—</span>
+    </div>
+    <input type="hidden" id="smbCurrentPath" value="">
+    <div style="max-height:340px;overflow-y:auto">
+      <table style="width:100%">
+        <tbody id="smbDirBody">
+          <tr><td class="text-muted">Clique em Navegar para carregar.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn" onclick="closeModal('mSmbBrowser')">Fechar</button>
+      <button type="button" class="btn btn-primary" onclick="smbSelectCurrent()">
+        Usar esta pasta
+      </button>
+    </div>
+  </div>
+</div>
 <div class="card">
   <div class="card-header"><h3>Histórico de Backups</h3><span class="text-muted" style="font-size:.76rem">{{ backups|length }} arquivos</span></div>
   {% if backups %}
@@ -1950,6 +2066,32 @@ def backups_page():
         backup_running=running, bk_info=bk_info,
         session=session, banner=get_banner(), active='backups', is_admin=True)
 
+@app.route('/admin/backups/browse', methods=['POST'])
+@admin_required
+def backup_browse():
+    import re as _re
+    data  = request.get_json(force=True) or {}
+    host  = data.get('host', '').strip()
+    share = data.get('share', '').strip()
+    user  = data.get('user', '').strip()
+    pwd   = data.get('pass', '')
+    path  = data.get('path', '').strip().strip('\\').strip('/')
+    if not host or not share:
+        return jsonify({'error': 'Informe host e compartilhamento'}), 400
+    smb_path = (path.replace('/', '\\') + '\\*') if path else '*'
+    rc, out, err = run(['smbclient', f'//{host}/{share}',
+                        '-U', f'{user}%{pwd}', '-c', f'ls {smb_path}'])
+    if rc != 0:
+        return jsonify({'error': (err or out).strip() or 'Falha ao conectar'})
+    dirs = []
+    for line in out.splitlines():
+        m = _re.match(r'^  (.+?)\s{2,}([A-Z]+)\s+\d', line)
+        if m:
+            name, attrs = m.group(1).rstrip(), m.group(2)
+            if 'D' in attrs and name not in ('.', '..'):
+                dirs.append(name)
+    return jsonify({'dirs': sorted(dirs), 'path': path})
+
 @app.route('/admin/backups/status')
 @admin_required
 def backup_status():
@@ -2019,8 +2161,11 @@ def backup_run():
                 return redirect(url_for('backups_page'))
             # Monta o compartilhamento CIFS e grava direto na rede (sem espaço local)
             import shlex
-            mnt = f'/run/smb_backup_{timestamp}'
-            out_file = os.path.join(mnt, filename)
+            smb_sub  = request.form.get('smb_sub', '').strip().strip('\\').strip('/')
+            mnt      = f'/run/smb_backup_{timestamp}'
+            sub_path = smb_sub.replace('\\', '/') if smb_sub else ''
+            dest_dir = os.path.join(mnt, sub_path) if sub_path else mnt
+            out_file = os.path.join(dest_dir, filename)
             tar_srcs = ' '.join(shlex.quote(t) for t in targets)
             smb_opts = shlex.quote(
                 f'username={smb_user},password={smb_pass},uid=0,gid=0,vers=3.0'
@@ -2028,6 +2173,7 @@ def backup_run():
             script = (
                 f'mkdir -p {shlex.quote(mnt)} && '
                 f'mount -t cifs //{smb_host}/{smb_share} {shlex.quote(mnt)} -o {smb_opts} && '
+                f'mkdir -p {shlex.quote(dest_dir)} && '
                 f'{tar} -czf {shlex.quote(out_file)} {tar_srcs} ; '
                 f'umount {shlex.quote(mnt)} ; '
                 f'rmdir {shlex.quote(mnt)}'
