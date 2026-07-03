@@ -1970,17 +1970,13 @@ def backup_status():
 def backup_cancel():
     try:
         _, info = backup_running()
-        for key in ('pid', 'pid2'):
-            pid = info.get(key)
-            if not pid:
-                continue
-            try:
-                os.killpg(os.getpgid(pid), signal.SIGTERM)
-            except Exception:
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                except Exception:
-                    pass
+        pgid = info.get('pgid')
+        if pgid and pgid != os.getpgrp():
+            run(['sudo', 'kill', '-TERM', f'-{pgid}'])
+        else:
+            pid = info.get('pid')
+            if pid:
+                run(['sudo', 'kill', '-TERM', str(pid)])
         out_file = info.get('file', '')
         if out_file and os.path.exists(out_file):
             try:
@@ -2034,9 +2030,11 @@ def backup_run():
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 start_new_session=True
             )
+            pgid = os.getpgid(proc.pid)
             with open(BACKUP_INFO_FILE, 'w') as fp:
-                json.dump({'pid': proc.pid, 'file': '', 'filename': filename,
-                           'started': time.time(), 'type': 'smb'}, fp)
+                json.dump({'pid': proc.pid, 'pgid': pgid, 'file': '',
+                           'filename': filename, 'started': time.time(),
+                           'type': 'smb'}, fp)
             flash(f'Backup SMB iniciado → \\\\{smb_host}\\{smb_share}\\{filename}', 'success')
         else:
             dest = request.form.get('backup_dest', BACKUP_DIR).strip() or BACKUP_DIR
@@ -2046,8 +2044,9 @@ def backup_run():
                 ['sudo', tar, '-czf', out_file] + targets,
                 start_new_session=True
             )
+            pgid = os.getpgid(proc.pid)
             with open(BACKUP_INFO_FILE, 'w') as fp:
-                json.dump({'pid': proc.pid, 'file': out_file,
+                json.dump({'pid': proc.pid, 'pgid': pgid, 'file': out_file,
                            'filename': filename, 'started': time.time()}, fp)
             flash(f'Backup iniciado → {out_file}', 'success')
 
