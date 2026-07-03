@@ -352,6 +352,28 @@
     validate: visudo -cf %s
     mode: "0440"
 
+- name: Instalar script de atualização de IP dinâmico
+  ansible.builtin.template:
+    src: cdpni-update-ip.sh.j2
+    dest: /usr/local/bin/cdpni-update-ip.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Criar serviço systemd de atualização de IP
+  ansible.builtin.template:
+    src: cdpni-update-ip.service.j2
+    dest: /etc/systemd/system/cdpni-update-ip.service
+    mode: "0644"
+  notify:
+    - reload systemd
+
+- name: Habilitar serviço de atualização de IP
+  ansible.builtin.systemd:
+    name: cdpni-update-ip
+    enabled: true
+    daemon_reload: true
+
 - name: Criar serviço systemd do portal
   ansible.builtin.template:
     src: cdpni-portal.service.j2

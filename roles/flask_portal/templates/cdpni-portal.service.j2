@@ -1,6 +1,7 @@
 [Unit]
 Description=CDPNI Portal Flask
-After=network.target smbd.service
+After=network.target smbd.service cdpni-update-ip.service
+Wants=cdpni-update-ip.service
 RequiresMountsFor={{ raid.mount }}
 
 [Service]

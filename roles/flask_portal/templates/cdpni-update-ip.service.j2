@@ -1,0 +1,15 @@
+[Unit]
+Description=CDPNI — Atualiza IP dinamico (config, nginx, SSL)
+After=network-online.target
+Wants=network-online.target
+Before=nginx.service cdpni-portal.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/cdpni-update-ip.sh
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

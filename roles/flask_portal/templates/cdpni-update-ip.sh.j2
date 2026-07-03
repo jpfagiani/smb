@@ -1,0 +1,61 @@
+#!/bin/bash
+# Detecta o IP atual da interface e atualiza config.py, nginx e certificado SSL.
+# Executado automaticamente pelo cdpni-update-ip.service a cada boot.
+
+IFACE="{{ server.iface }}"
+PORTAL_DIR="{{ portal.dir }}"
+NGINX_CONF="/etc/nginx/sites-available/cdpni-portal"
+SSL_CERT="{{ ssl.cert }}"
+SSL_KEY="{{ ssl.key }}"
+HOSTNAME="{{ server.hostname }}"
+DOMAIN="{{ server.domain }}"
+IP_CACHE="$PORTAL_DIR/.last_ip"
+
+# Detecta IP atual da interface
+CURRENT_IP=$(ip -4 addr show "$IFACE" 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
+
+if [[ -z "$CURRENT_IP" ]]; then
+    echo "cdpni-update-ip: nenhum IP encontrado em $IFACE, abortando." >&2
+    exit 1
+fi
+
+# Lê IP anterior (se existir)
+LAST_IP=$(cat "$IP_CACHE" 2>/dev/null || echo "")
+
+if [[ "$CURRENT_IP" == "$LAST_IP" ]]; then
+    echo "cdpni-update-ip: IP $CURRENT_IP nao mudou, nenhuma acao necessaria."
+    exit 0
+fi
+
+echo "cdpni-update-ip: IP mudou de '$LAST_IP' para '$CURRENT_IP' — atualizando..."
+
+# 1. Atualiza config.py do portal
+if [[ -f "$PORTAL_DIR/config.py" ]]; then
+    sed -i "s/^SERVER_IP\s*=.*/SERVER_IP = '$CURRENT_IP'/" "$PORTAL_DIR/config.py"
+    echo "  config.py atualizado"
+fi
+
+# 2. Atualiza server_name no nginx
+if [[ -f "$NGINX_CONF" ]]; then
+    sed -i "s/^\(\s*server_name\s\).*/\1$CURRENT_IP $HOSTNAME $HOSTNAME.$DOMAIN;/" "$NGINX_CONF"
+    echo "  nginx server_name atualizado"
+fi
+
+# 3. Recria certificado SSL com o novo IP
+mkdir -p "$(dirname "$SSL_CERT")"
+openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+    -keyout "$SSL_KEY" \
+    -out    "$SSL_CERT" \
+    -subj   "/C={{ ssl.country }}/ST={{ ssl.state }}/O={{ ssl.org }}/CN=$CURRENT_IP" \
+    -addext "subjectAltName=IP:$CURRENT_IP,DNS:$HOSTNAME,DNS:$HOSTNAME.$DOMAIN" \
+    2>/dev/null && echo "  certificado SSL recriado"
+
+# 4. Salva o IP atual para comparação no próximo boot
+echo "$CURRENT_IP" > "$IP_CACHE"
+
+# 5. Recarrega nginx (o portal sobe depois deste serviço)
+if systemctl is-active --quiet nginx; then
+    nginx -t 2>/dev/null && systemctl reload nginx && echo "  nginx recarregado"
+fi
+
+echo "cdpni-update-ip: concluido (IP=$CURRENT_IP)"
