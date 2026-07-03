@@ -16,6 +16,11 @@
     mode: "0644"
   notify: reload networking
 
+- name: Desbloquear resolv.conf antes de qualquer alteração de rede
+  ansible.builtin.command: chattr -i /etc/resolv.conf
+  ignore_errors: true
+  changed_when: false
+
 - name: Aplicar IP imediatamente (sem reiniciar)
   ansible.builtin.shell: |
     ip addr flush dev {{ server.iface }} 2>/dev/null || true
@@ -25,4 +30,7 @@
   changed_when: false
   ignore_errors: true
 
-
+- name: Bloquear resolv.conf contra sobrescrita (chattr +i)
+  ansible.builtin.command: chattr +i /etc/resolv.conf
+  ignore_errors: true
+  changed_when: false
