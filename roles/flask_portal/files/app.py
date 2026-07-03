@@ -1573,9 +1573,10 @@ def _rebuild_smb_conf(shares: list[dict]) -> str:
         elif not in_managed:
             lines_out.append(line)
     result = '\n'.join(lines_out).rstrip() + '\n'
-    # campos que são escritos explicitamente — os demais são preservados como estão
+    # campos escritos explicitamente — os demais são preservados como estão
     EXPLICIT = {'name', 'comment', 'path', 'browseable', 'read_only', 'writable',
-                'valid_users', 'create_mask', 'directory_mask'}
+                'valid_users', 'create_mask', 'directory_mask', 'force_group',
+                'force_create_mode', 'force_directory_mode'}
     for s in shares:
         result += f'\n[{s["name"]}]\n'
         if s.get('comment'):
@@ -1585,9 +1586,14 @@ def _rebuild_smb_conf(shares: list[dict]) -> str:
         result += f'   read only = {s.get("read_only","no")}\n'
         if s.get('valid_users'):
             result += f'   valid users = {s["valid_users"]}\n'
+        # force group: usa valor existente ou deriva do nome da share
+        fg = s.get('force_group') or ('grp_' + s['name'].lower())
+        result += f'   force group = {fg}\n'
         result += f'   create mask = {s.get("create_mask","0664")}\n'
         result += f'   directory mask = {s.get("directory_mask","0775")}\n'
-        # preserva campos extras do smb.conf original (force group, force create mode, etc.)
+        result += f'   force create mode = {s.get("force_create_mode","0664")}\n'
+        result += f'   force directory mode = {s.get("force_directory_mode","0777")}\n'
+        # preserva outros campos extras do smb.conf original
         for k, v in s.items():
             if k in EXPLICIT:
                 continue
