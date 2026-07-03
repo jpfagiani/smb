@@ -8,5 +8,3 @@ auto {{ server.iface }}
 iface {{ server.iface }} inet static
     address {{ server.ip }}/{{ server.mask }}
     gateway {{ server.gateway }}
-    dns-nameservers {{ server.dns }}
-    dns-search {{ server.domain }}

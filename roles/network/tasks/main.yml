@@ -25,11 +25,4 @@
   changed_when: false
   ignore_errors: true
 
-- name: Configurar DNS em /etc/resolv.conf
-  ansible.builtin.copy:
-    dest: /etc/resolv.conf
-    content: |
-      nameserver {{ server.dns }}
-      search {{ server.domain }}
-    mode: "0644"
 
