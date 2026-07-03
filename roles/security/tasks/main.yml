@@ -12,16 +12,6 @@
     enabled: false
   ignore_errors: true
 
-- name: Remover regras iptables legadas
-  ansible.builtin.command: "{{ item }}"
-  loop:
-    - iptables -F
-    - iptables -X
-    - iptables -P INPUT ACCEPT
-    - iptables -P FORWARD ACCEPT
-    - iptables -P OUTPUT ACCEPT
-  ignore_errors: true
-  changed_when: false
 
 - name: Implantar ruleset nftables
   ansible.builtin.template:
