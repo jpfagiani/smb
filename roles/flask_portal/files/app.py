@@ -214,7 +214,7 @@ def parse_smb_shares() -> list[dict]:
                     name = line[1:-1]
                     if name not in ('global', 'homes', 'printers', 'print$'):
                         current = {'name': name, 'path': '', 'comment': '',
-                                   'valid_users': '', 'read_only': 'yes',
+                                   'valid_users': '', 'read_only': 'no',
                                    'browseable': 'yes', 'create_mask': '0664',
                                    'directory_mask': '0775'}
                         shares.append(current)
@@ -223,7 +223,11 @@ def parse_smb_shares() -> list[dict]:
                 elif current and '=' in line and not line.startswith('#') and not line.startswith(';'):
                     k, _, v = line.partition('=')
                     k = k.strip().lower().replace(' ', '_')
-                    current[k] = v.strip()
+                    # normaliza writable=yes → read_only=no
+                    if k == 'writable':
+                        current['read_only'] = 'no' if v.strip().lower() in ('yes', 'true', '1') else 'yes'
+                    else:
+                        current[k] = v.strip()
     except Exception:
         pass
     return shares
@@ -1569,6 +1573,9 @@ def _rebuild_smb_conf(shares: list[dict]) -> str:
         elif not in_managed:
             lines_out.append(line)
     result = '\n'.join(lines_out).rstrip() + '\n'
+    # campos que são escritos explicitamente — os demais são preservados como estão
+    EXPLICIT = {'name', 'comment', 'path', 'browseable', 'read_only', 'writable',
+                'valid_users', 'create_mask', 'directory_mask'}
     for s in shares:
         result += f'\n[{s["name"]}]\n'
         if s.get('comment'):
@@ -1580,6 +1587,12 @@ def _rebuild_smb_conf(shares: list[dict]) -> str:
             result += f'   valid users = {s["valid_users"]}\n'
         result += f'   create mask = {s.get("create_mask","0664")}\n'
         result += f'   directory mask = {s.get("directory_mask","0775")}\n'
+        # preserva campos extras do smb.conf original (force group, force create mode, etc.)
+        for k, v in s.items():
+            if k in EXPLICIT:
+                continue
+            smb_key = k.replace('_', ' ')
+            result += f'   {smb_key} = {v}\n'
     return result
 
 def _write_smb_conf(content: str) -> tuple[bool, str]:
