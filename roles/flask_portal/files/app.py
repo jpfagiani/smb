@@ -1,4 +1,4 @@
-import os, re, shutil, subprocess, mimetypes, hashlib, json, time
+import os, re, shutil, subprocess, mimetypes, hashlib, json, time, signal
 from pathlib import Path
 from functools import wraps
 from datetime import datetime
@@ -17,7 +17,8 @@ ADMIN_USERS  = set(app.config['ADMIN_USERS'])
 PORTAL_DIR   = os.path.dirname(os.path.abspath(__file__))
 BANNER_DIR   = os.path.join(PORTAL_DIR, 'banners')
 SMB_CONF     = '/etc/samba/smb.conf'
-BACKUP_DIR   = app.config.get('BACKUP_DIR', '/opt/backups')
+BACKUP_DIR      = app.config.get('BACKUP_DIR', '/opt/backups')
+BACKUP_INFO_FILE = '/tmp/cdpni_backup_info.json'
 PERMS_FILE   = os.path.join(PORTAL_DIR, 'permissions.json')
 os.makedirs(BANNER_DIR, exist_ok=True)
 
@@ -379,6 +380,22 @@ def get_samba_logs(lines: int = 100) -> str:
         pass
     return '\n\n'.join(result) if result else '(sem logs disponíveis)'
 
+def backup_running():
+    """Retorna (is_running, info_dict) para o backup em andamento."""
+    try:
+        with open(BACKUP_INFO_FILE) as f:
+            info = json.load(f)
+        pid = info.get('pid')
+        if pid:
+            try:
+                os.kill(pid, 0)
+                return True, info
+            except (ProcessLookupError, PermissionError):
+                return False, info
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return False, {}
+
 def get_backups() -> list[dict]:
     backups = []
     try:
@@ -496,6 +513,7 @@ pre.log-box{background:var(--bg3);border:0.5px solid var(--border);border-radius
 .statusbar span{font-size:.68rem;color:var(--muted)}
 .st-on{display:flex;align-items:center;gap:.3rem;font-size:.68rem;color:var(--success)}
 .st-dot{width:5px;height:5px;border-radius:50%;background:currentColor;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
 """
 
 BASE_T = """<!DOCTYPE html><html lang="pt-BR">
@@ -1783,6 +1801,26 @@ def raid_smart():
 # ── backups ────────────────────────────────────────────────────────────────────
 BACKUPS_T = BASE_T.replace("__BODY__", """
 <div class="page-title">🗄️ Backups</div>
+{% if backup_running %}
+<div class="card" style="margin-bottom:1rem;border:2px solid var(--accent)">
+  <div class="card-header" style="background:var(--accent);color:#fff;display:flex;align-items:center;gap:.5rem">
+    <span style="animation:spin 1s linear infinite;display:inline-block">⏳</span>
+    <h3 style="color:#fff">Backup em Andamento</h3>
+  </div>
+  <div class="card-body">
+    <div style="margin-bottom:.75rem">
+      <span id="bkSize" style="font-family:var(--mono);font-size:1.1rem;font-weight:600">--</span>
+      <span class="text-muted" style="font-size:.82rem"> gravados &nbsp;·&nbsp; <span id="bkElapsed">0s</span> decorridos</span>
+    </div>
+    <div style="background:var(--border);border-radius:4px;height:10px;overflow:hidden;margin-bottom:1rem">
+      <div id="bkBar" style="height:100%;background:var(--accent);width:5%;transition:width .8s ease;border-radius:4px"></div>
+    </div>
+    <form method="post" action="{{ url_for('backup_cancel') }}" onsubmit="return confirm('Cancelar o backup em andamento? O arquivo parcial sera removido.')">
+      <button type="submit" class="btn" style="background:#c0392b;color:#fff;font-size:.82rem">✖ Cancelar Backup</button>
+    </form>
+  </div>
+</div>
+{% endif %}
 <div class="card" style="margin-bottom:1rem">
   <div class="card-header"><h3>Novo Backup</h3></div>
   <div class="card-body">
@@ -1866,16 +1904,91 @@ function toggleDest(v){
   <input type="hidden" name="filename" id="delBackupName">
 </form>
 <script>
-function confirmDelBackup(n){if(!confirm('Excluir "'+n+'"?'))return;document.getElementById('delBackupName').value=n;document.getElementById('fDelBackup').submit();}
+function confirmDelBackup(n) {
+  if (!confirm("Excluir " + n + "?")) return;
+  document.getElementById("delBackupName").value = n;
+  document.getElementById("fDelBackup").submit();
+}
+(function() {
+  var running = {{ "true" if backup_running else "false" }};
+  if (!running) return;
+  var timer = null;
+  function fmtTime(s) {
+    if (s < 60) return s + "s";
+    return Math.floor(s / 60) + "m " + (s % 60) + "s";
+  }
+  function poll() {
+    fetch("{{ url_for('backup_status') }}")
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.running) {
+          var sz = document.getElementById("bkSize");
+          var el = document.getElementById("bkElapsed");
+          var bar = document.getElementById("bkBar");
+          if (sz) sz.textContent = d.size_fmt;
+          if (el) el.textContent = fmtTime(d.elapsed);
+          if (bar) bar.style.width = Math.min(90, 5 + (d.elapsed / 180) * 85) + "%";
+        } else {
+          clearInterval(timer);
+          window.location.reload();
+        }
+      })
+      .catch(function() {});
+  }
+  poll();
+  timer = setInterval(poll, 2000);
+})();
 </script>
 """)
 
 @app.route('/admin/backups')
 @admin_required
 def backups_page():
+    running, bk_info = backup_running()
     return render_template_string(BACKUPS_T,
         backups=get_backups(), backup_dir=BACKUP_DIR, samba_root=SAMBA_ROOT,
+        backup_running=running, bk_info=bk_info,
         session=session, banner=get_banner(), active='backups', is_admin=True)
+
+@app.route('/admin/backups/status')
+@admin_required
+def backup_status():
+    running, info = backup_running()
+    size = 0
+    f = info.get('file', '')
+    if f and os.path.exists(f):
+        size = os.path.getsize(f)
+    elapsed = int(time.time() - info['started']) if info.get('started') else 0
+    return jsonify({'running': running, 'size': size,
+                    'size_fmt': fmt_size(size), 'elapsed': elapsed,
+                    'filename': info.get('filename', '')})
+
+@app.route('/admin/backups/cancel', methods=['POST'])
+@admin_required
+def backup_cancel():
+    try:
+        _, info = backup_running()
+        pid = info.get('pid')
+        if pid:
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+            except Exception:
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except Exception:
+                    pass
+        out_file = info.get('file', '')
+        if out_file and os.path.exists(out_file):
+            try:
+                os.remove(out_file)
+            except Exception:
+                pass
+        if os.path.exists(BACKUP_INFO_FILE):
+            os.remove(BACKUP_INFO_FILE)
+        flash('Backup cancelado.', 'warning')
+    except Exception as e:
+        flash(f'Erro ao cancelar: {e}', 'error')
+    return redirect(url_for('backups_page'))
 
 @app.route('/admin/backups/run', methods=['GET', 'POST'])
 @admin_required
@@ -1925,7 +2038,13 @@ def backup_run():
             dest = request.form.get('backup_dest', BACKUP_DIR).strip() or BACKUP_DIR
             run(['sudo', 'mkdir', '-p', dest])
             out_file = os.path.join(dest, filename)
-            subprocess.Popen(['sudo', tar, '-czf', out_file] + targets)
+            proc = subprocess.Popen(
+                ['sudo', tar, '-czf', out_file] + targets,
+                start_new_session=True
+            )
+            with open(BACKUP_INFO_FILE, 'w') as fp:
+                json.dump({'pid': proc.pid, 'file': out_file,
+                           'filename': filename, 'started': time.time()}, fp)
             flash(f'Backup iniciado → {out_file}', 'success')
 
     except Exception as e:
