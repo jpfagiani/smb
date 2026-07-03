@@ -1888,76 +1888,110 @@ function toggleDest(v) {
   updateSmbPreview();
 }
 function updateSmbPreview() {
-  var host  = (document.getElementById("smbHost")  || {}).value || "";
-  var share = (document.getElementById("smbShare") || {}).value || "";
-  var sub   = (document.getElementById("smbSub")   || {}).value || "";
+  var host  = (document.getElementById("smbHost")  || {value:""}).value;
+  var share = (document.getElementById("smbShare") || {value:""}).value;
+  var sub   = (document.getElementById("smbSub")   || {value:""}).value;
   var p = document.getElementById("smbPreview");
-  if (p && host && share)
-    p.textContent = "Destino: \\\\" + host + "\\" + share + (sub ? "\\" + sub.replace(/\//g,"\\") : "") + "\\";
-  else if (p) p.textContent = "";
+  if (!p) return;
+  p.textContent = (host && share)
+    ? "Destino: \\\\" + host + "\\" + share + (sub ? "\\" + sub.replace(/\//g, "\\") : "") + "\\"
+    : "";
 }
 ["smbHost","smbShare","smbSub"].forEach(function(id) {
   var el = document.getElementById(id);
   if (el) el.addEventListener("input", updateSmbPreview);
 });
-
-var _smbBrowsePath = "";
 function smbBrowse(path) {
   var host  = document.getElementById("smbHost").value.trim();
   var share = document.getElementById("smbShare").value.trim();
   var user  = document.getElementById("smbUser").value.trim();
   var pass  = document.getElementById("smbPass").value;
   if (!host || !share) { alert("Preencha o IP e o nome do compartilhamento primeiro."); return; }
-  _smbBrowsePath = path;
-  var modal = document.getElementById("mSmbBrowser");
-  if (modal) modal.classList.add("open");
+  document.getElementById("mSmbBrowser").classList.add("open");
   smbLoadDir(host, share, user, pass, path);
 }
 function smbLoadDir(host, share, user, pass, path) {
   var body = document.getElementById("smbDirBody");
-  if (body) body.innerHTML = "<tr><td colspan=2 class=text-muted>Carregando...</td></tr>";
+  body.innerHTML = "";
+  var loading = document.createElement("tr");
+  loading.innerHTML = "<td colspan='2' class='text-muted'>Carregando...</td>";
+  body.appendChild(loading);
+  document.getElementById("smbCurrentPath").value = path || "";
   fetch("{{ url_for('backup_browse') }}", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({host: host, share: share, user: user, pass: pass, path: path})
+    body: JSON.stringify({host:host, share:share, user:user, pass:pass, path:path||""})
   })
   .then(function(r) { return r.json(); })
   .then(function(d) {
     var bread = document.getElementById("smbBreadcrumb");
     if (bread) {
+      bread.innerHTML = "";
+      var root = document.createElement("span");
+      root.style.cursor = "pointer";
+      root.className = "text-muted";
+      root.textContent = "\\\\" + host + "\\" + share;
+      root.onclick = function() { smbLoadDir(host, share, user, pass, ""); };
+      bread.appendChild(root);
       var parts = path ? path.split("\\").filter(Boolean) : [];
-      var html = "<span class=text-muted style=cursor:pointer onclick=\\"smbBrowse(\\'\\')\\">\\\\\\\\"+host+"\\\\"+share+"</span>";
       var acc = "";
-      parts.forEach(function(p) {
-        acc += (acc ? "\\\\" : "") + p;
-        var a = acc;
-        html += " \\\\ <span style=cursor:pointer onclick=\\"smbBrowse(\\'"+a+"\\')\\">"+p+"</span>";
+      parts.forEach(function(part) {
+        acc = acc ? acc + "\\" + part : part;
+        var sep = document.createTextNode(" \\ ");
+        bread.appendChild(sep);
+        var sp = document.createElement("span");
+        sp.style.cursor = "pointer";
+        sp.textContent = part;
+        (function(p) { sp.onclick = function() { smbLoadDir(host, share, user, pass, p); }; })(acc);
+        bread.appendChild(sp);
       });
-      bread.innerHTML = html;
     }
-    var cur = document.getElementById("smbCurrentPath");
-    if (cur) cur.value = path;
-    if (body) {
-      if (d.error) { body.innerHTML = "<tr><td colspan=2 style=color:#c0392b>"+d.error+"</td></tr>"; return; }
-      var rows = "";
-      if (path) rows += "<tr><td><span style=cursor:pointer onclick=\\"smbBrowse(\\'"+smbParent(path)+"\\')\\">📁 ..</span></td><td></td></tr>";
-      (d.dirs||[]).forEach(function(dir) {
-        var full = path ? path+"\\\\"+dir : dir;
-        rows += "<tr><td><span style=cursor:pointer onclick=\\"smbBrowse(\\'"+full+"\\')\\">📁 "+dir+"</span></td>"
-              + "<td><button type=button class=\\"btn btn-xs btn-primary\\" onclick=\\"smbSelect(\\'"+full+"\\')\\">Selecionar</button></td></tr>";
-      });
-      if (!rows && !path) rows = "<tr><td colspan=2 class=text-muted>Nenhuma pasta encontrada</td></tr>";
-      body.innerHTML = rows || "<tr><td colspan=2 class=text-muted>Pasta vazia</td></tr>";
+    body.innerHTML = "";
+    if (d.error) {
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td colspan='2' style='color:#c0392b'>" + d.error + "</td>";
+      body.appendChild(tr); return;
+    }
+    if (path) {
+      var up = document.createElement("tr");
+      var td = document.createElement("td");
+      td.textContent = "📁 ..";
+      td.style.cursor = "pointer";
+      var par = path.split("\\").slice(0,-1).join("\\");
+      (function(p) { td.onclick = function() { smbLoadDir(host, share, user, pass, p); }; })(par);
+      up.appendChild(td);
+      up.appendChild(document.createElement("td"));
+      body.appendChild(up);
+    }
+    (d.dirs || []).forEach(function(dir) {
+      var full = path ? path + "\\" + dir : dir;
+      var tr = document.createElement("tr");
+      var td1 = document.createElement("td");
+      td1.textContent = "📁 " + dir;
+      td1.style.cursor = "pointer";
+      (function(f) { td1.onclick = function() { smbLoadDir(host, share, user, pass, f); }; })(full);
+      var td2 = document.createElement("td");
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn btn-xs btn-primary";
+      btn.textContent = "Selecionar";
+      (function(f) { btn.onclick = function() { smbSelect(f); }; })(full);
+      td2.appendChild(btn);
+      tr.appendChild(td1); tr.appendChild(td2);
+      body.appendChild(tr);
+    });
+    if (!body.hasChildNodes()) {
+      var empty = document.createElement("tr");
+      empty.innerHTML = "<td colspan='2' class='text-muted'>Pasta vazia</td>";
+      body.appendChild(empty);
     }
   })
   .catch(function(e) {
-    if (body) body.innerHTML = "<tr><td colspan=2 style=color:#c0392b>Erro: "+e+"</td></tr>";
+    body.innerHTML = "";
+    var tr = document.createElement("tr");
+    tr.innerHTML = "<td colspan='2' style='color:#c0392b'>Erro: " + e + "</td>";
+    body.appendChild(tr);
   });
-}
-function smbParent(path) {
-  var parts = path.split("\\\\").filter(Boolean);
-  parts.pop();
-  return parts.join("\\\\");
 }
 function smbSelect(path) {
   document.getElementById("smbSub").value = path;
