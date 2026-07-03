@@ -1959,8 +1959,10 @@ def backup_status():
     if f and os.path.exists(f):
         size = os.path.getsize(f)
     elapsed = int(time.time() - info['started']) if info.get('started') else 0
+    is_smb = info.get('type') == 'smb'
     return jsonify({'running': running, 'size': size,
-                    'size_fmt': fmt_size(size), 'elapsed': elapsed,
+                    'size_fmt': 'Enviando via rede...' if is_smb else fmt_size(size),
+                    'elapsed': elapsed, 'is_smb': is_smb,
                     'filename': info.get('filename', '')})
 
 @app.route('/admin/backups/cancel', methods=['POST'])
