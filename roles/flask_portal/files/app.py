@@ -2017,14 +2017,16 @@ def backup_run():
             if not smb_host or not smb_share:
                 flash('Informe o IP e o nome do compartilhamento Windows.', 'error')
                 return redirect(url_for('backups_page'))
-            # Pipe tar → smbclient via bash (mais confiável que Popen duplo)
+            # Grava em /mnt/raid como temporário (3.5 TB livres) e envia via smbclient
             import shlex
-            tar_args = ' '.join(shlex.quote(t) for t in targets)
+            tmp_file = f'/mnt/raid/.backup_smb_{timestamp}.tar.gz'
             smb_cred = shlex.quote(f'{smb_user}%{smb_pass}')
-            smb_put  = shlex.quote(f'put - {filename}')
-            cmd = (f'sudo {tar} -czf - {tar_args}'
-                   f' | smbclient //{smb_host}/{smb_share}'
-                   f' -U {smb_cred} -c {smb_put}')
+            smb_put  = shlex.quote(f'put {tmp_file} {filename}')
+            cmd = (f'sudo {tar} -czf {shlex.quote(tmp_file)} '
+                   + ' '.join(shlex.quote(t) for t in targets)
+                   + f' && smbclient //{smb_host}/{smb_share}'
+                   f' -U {smb_cred} -c {smb_put}'
+                   f' && sudo rm -f {shlex.quote(tmp_file)}')
             proc = subprocess.Popen(
                 ['bash', '-c', cmd],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -2032,7 +2034,7 @@ def backup_run():
             )
             pgid = os.getpgid(proc.pid)
             with open(BACKUP_INFO_FILE, 'w') as fp:
-                json.dump({'pid': proc.pid, 'pgid': pgid, 'file': '',
+                json.dump({'pid': proc.pid, 'pgid': pgid, 'file': tmp_file,
                            'filename': filename, 'started': time.time(),
                            'type': 'smb'}, fp)
             flash(f'Backup SMB iniciado → \\\\{smb_host}\\{smb_share}\\{filename}', 'success')
