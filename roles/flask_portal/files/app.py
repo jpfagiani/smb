@@ -1573,6 +1573,22 @@ def _rebuild_smb_conf(shares: list[dict]) -> str:
         elif not in_managed:
             lines_out.append(line)
     result = '\n'.join(lines_out).rstrip() + '\n'
+    # mapeamento share → grupo correto (casos onde nome != grupo)
+    SHARE_GROUP_MAP = {
+        'Chefia_Turno_I':    'grp_chefia1',
+        'Chefia_Turno_II':   'grp_chefia2',
+        'Chefia_Turno_III':  'grp_chefia3',
+        'Chefia_Turno_IV':   'grp_chefia4',
+        'Conexao_Familiar':  'grp_conexao',
+        'Infraestrutura':    'grp_infra',
+        'Nucleo_de_Pessoal': 'grp_npessoal',
+        'Portaria_Turno_I':  'grp_portaria1',
+        'Portaria_Turno_II': 'grp_portaria2',
+        'Portaria_Turno_III':'grp_portaria3',
+        'Portaria_Turno_IV': 'grp_portaria4',
+        'Rol_de_Visitas':    'grp_rol',
+        'Diretoria_Geral':   'grp_dg',
+    }
     # campos escritos explicitamente — os demais são preservados como estão
     EXPLICIT = {'name', 'comment', 'path', 'browseable', 'read_only', 'writable',
                 'valid_users', 'create_mask', 'directory_mask', 'force_group',
@@ -1586,8 +1602,8 @@ def _rebuild_smb_conf(shares: list[dict]) -> str:
         result += f'   read only = {s.get("read_only","no")}\n'
         if s.get('valid_users'):
             result += f'   valid users = {s["valid_users"]}\n'
-        # force group: usa valor existente ou deriva do nome da share
-        fg = s.get('force_group') or ('grp_' + s['name'].lower())
+        # force group: mapeamento fixo > valor existente > deriva do nome
+        fg = SHARE_GROUP_MAP.get(s['name']) or s.get('force_group') or ('grp_' + s['name'].lower())
         result += f'   force group = {fg}\n'
         result += f'   create mask = {s.get("create_mask","0664")}\n'
         result += f'   directory mask = {s.get("directory_mask","0775")}\n'
