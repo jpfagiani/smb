@@ -6,11 +6,10 @@
     state: present
 
 - name: Desabilitar UFW se instalado (evitar conflito)
-  ansible.builtin.service:
-    name: ufw
-    state: stopped
-    enabled: false
+  ansible.builtin.command: systemctl disable --now ufw
+  when: ansible_facts.services is defined and 'ufw' in ansible_facts.services
   ignore_errors: true
+  changed_when: false
 
 
 - name: Implantar ruleset nftables
