@@ -18,7 +18,7 @@ PORTAL_DIR   = os.path.dirname(os.path.abspath(__file__))
 BANNER_DIR   = os.path.join(PORTAL_DIR, 'banners')
 SMB_CONF     = '/etc/samba/smb.conf'
 BACKUP_DIR      = app.config.get('BACKUP_DIR', '/opt/backups')
-BACKUP_INFO_FILE = '/tmp/cdpni_backup_info.json'
+BACKUP_INFO_FILE = os.path.join(PORTAL_DIR, '.backup_info.json')
 PERMS_FILE   = os.path.join(PORTAL_DIR, 'permissions.json')
 os.makedirs(BANNER_DIR, exist_ok=True)
 
