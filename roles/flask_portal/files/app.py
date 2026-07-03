@@ -1218,6 +1218,13 @@ def user_permissions():
         x = 'x' if request.form.get(f'perm_{s["name"]}_x') else ''
         perm_str = r + w + x
         user_p[s['name']] = perm_str
+        # Sincroniza grupo Linux com o acesso Samba (valid users = @grupo)
+        grp = s.get('force_group', '').lstrip('+').strip()
+        if grp and re.match(r'^[a-z][a-z0-9_-]*$', grp):
+            if perm_str:
+                add_group_member(username, grp)
+            else:
+                remove_group_member(username, grp)
         if path and os.path.isdir(path):
             if perm_str:
                 run(['sudo', 'setfacl', '-m', f'u:{username}:{perm_str}', path])
