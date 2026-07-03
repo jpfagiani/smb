@@ -1856,7 +1856,7 @@ BACKUPS_T = BASE_T.replace("__BODY__", """
             <input type="password" name="smb_pass" placeholder="••••••" style="width:100%;font-family:var(--mono);font-size:.82rem">
           </div>
         </div>
-        <small class="text-muted">O arquivo será enviado para <code>\\IP\Compartilhamento\</code> via SMB</small>
+        <small class="text-muted">O arquivo será enviado para <code>\\\\IP\\NomeDoCompartilhamento\\</code> via SMB</small>
       </div>
       <div class="form-group" style="margin-top:.5rem">
         <label>Incluir no backup</label>
