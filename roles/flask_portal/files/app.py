@@ -1894,13 +1894,17 @@ function updateSmbPreview() {
   var p = document.getElementById("smbPreview");
   if (!p) return;
   p.textContent = (host && share)
-    ? "Destino: \\\\" + host + "\\" + share + (sub ? "\\" + sub.replace(/\//g, "\\") : "") + "\\"
+    ? "Destino: //" + host + "/" + share + (sub ? "/" + sub.replace(/\\/g, "/") : "") + "/"
     : "";
 }
 ["smbHost","smbShare","smbSub"].forEach(function(id) {
   var el = document.getElementById(id);
   if (el) el.addEventListener("input", updateSmbPreview);
 });
+(function() {
+  var sel = document.querySelector("input[name='dest_type']:checked");
+  if (sel) toggleDest(sel.value);
+})();
 function smbBrowse(path) {
   var host  = document.getElementById("smbHost").value.trim();
   var share = document.getElementById("smbShare").value.trim();
