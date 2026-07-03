@@ -1968,8 +1968,10 @@ def backup_status():
 def backup_cancel():
     try:
         _, info = backup_running()
-        pid = info.get('pid')
-        if pid:
+        for key in ('pid', 'pid2'):
+            pid = info.get(key)
+            if not pid:
+                continue
             try:
                 os.killpg(os.getpgid(pid), signal.SIGTERM)
             except Exception:
@@ -2017,23 +2019,25 @@ def backup_run():
             if not smb_host or not smb_share:
                 flash('Informe o IP e o nome do compartilhamento Windows.', 'error')
                 return redirect(url_for('backups_page'))
-            # cria backup local temporário e depois envia via smbclient
-            tmp_file = os.path.join('/tmp', filename)
-            rc, _, err = run(['sudo', tar, '-czf', tmp_file] + targets)
-            if rc != 0:
-                flash(f'Erro ao gerar backup: {err}', 'error')
-                return redirect(url_for('backups_page'))
-            smb_cmd = f"put {tmp_file} {filename}"
-            rc2, _, err2 = run([
-                'smbclient', f'//{smb_host}/{smb_share}',
-                '-U', f'{smb_user}%{smb_pass}',
-                '-c', smb_cmd
-            ])
-            run(['sudo', 'rm', '-f', tmp_file])
-            if rc2 != 0:
-                flash(f'Backup gerado mas falhou ao enviar para a rede: {err2}', 'error')
-            else:
-                flash(f'Backup enviado para \\\\{smb_host}\\{smb_share}\\{filename}', 'success')
+            # Pipe tar → smbclient sem arquivo temporário local
+            tar_proc = subprocess.Popen(
+                ['sudo', tar, '-czf', '-'] + targets,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                start_new_session=True
+            )
+            smb_proc = subprocess.Popen(
+                ['smbclient', f'//{smb_host}/{smb_share}',
+                 '-U', f'{smb_user}%{smb_pass}',
+                 '-c', f'put - {filename}'],
+                stdin=tar_proc.stdout,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            tar_proc.stdout.close()
+            with open(BACKUP_INFO_FILE, 'w') as fp:
+                json.dump({'pid': tar_proc.pid, 'pid2': smb_proc.pid,
+                           'file': '', 'filename': filename,
+                           'started': time.time(), 'type': 'smb'}, fp)
+            flash(f'Backup SMB iniciado → \\\\{smb_host}\\{smb_share}\\{filename}', 'success')
         else:
             dest = request.form.get('backup_dest', BACKUP_DIR).strip() or BACKUP_DIR
             run(['sudo', 'mkdir', '-p', dest])
