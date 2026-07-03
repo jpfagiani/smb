@@ -2017,24 +2017,29 @@ def backup_run():
             if not smb_host or not smb_share:
                 flash('Informe o IP e o nome do compartilhamento Windows.', 'error')
                 return redirect(url_for('backups_page'))
-            # Grava em /mnt/raid como temporário (3.5 TB livres) e envia via smbclient
+            # Monta o compartilhamento CIFS e grava direto na rede (sem espaço local)
             import shlex
-            tmp_file = f'/mnt/raid/.backup_smb_{timestamp}.tar.gz'
-            smb_cred = shlex.quote(f'{smb_user}%{smb_pass}')
-            smb_put  = shlex.quote(f'put {tmp_file} {filename}')
-            cmd = (f'sudo {tar} -czf {shlex.quote(tmp_file)} '
-                   + ' '.join(shlex.quote(t) for t in targets)
-                   + f' && smbclient //{smb_host}/{smb_share}'
-                   f' -U {smb_cred} -c {smb_put}'
-                   f' && sudo rm -f {shlex.quote(tmp_file)}')
+            mnt = f'/run/smb_backup_{timestamp}'
+            out_file = os.path.join(mnt, filename)
+            tar_srcs = ' '.join(shlex.quote(t) for t in targets)
+            smb_opts = shlex.quote(
+                f'username={smb_user},password={smb_pass},uid=0,gid=0,vers=3.0'
+            )
+            script = (
+                f'mkdir -p {shlex.quote(mnt)} && '
+                f'mount -t cifs //{smb_host}/{smb_share} {shlex.quote(mnt)} -o {smb_opts} && '
+                f'{tar} -czf {shlex.quote(out_file)} {tar_srcs} ; '
+                f'umount {shlex.quote(mnt)} ; '
+                f'rmdir {shlex.quote(mnt)}'
+            )
             proc = subprocess.Popen(
-                ['bash', '-c', cmd],
+                ['sudo', 'bash', '-c', script],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 start_new_session=True
             )
             pgid = os.getpgid(proc.pid)
             with open(BACKUP_INFO_FILE, 'w') as fp:
-                json.dump({'pid': proc.pid, 'pgid': pgid, 'file': tmp_file,
+                json.dump({'pid': proc.pid, 'pgid': pgid, 'file': out_file,
                            'filename': filename, 'started': time.time(),
                            'type': 'smb'}, fp)
             flash(f'Backup SMB iniciado → \\\\{smb_host}\\{smb_share}\\{filename}', 'success')
