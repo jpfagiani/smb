@@ -3,6 +3,10 @@ SAMBA_ROOT  = '{{ raid.mount }}/shares'
 ADMIN_USERS = ['{{ server.admin_user }}', 'cpd', 'supervisao']
 SERVER_IP   = '{{ server.ip }}'
 DOMAIN      = '{{ server.domain }}'
+SERVER_HOSTNAME = '{{ server.hostname }}'
+# Identidade da unidade — exibida no portal (título, login, rodapé)
+ORG_NAME     = '{{ org.name | default("CDPNI") }}'
+ORG_FULLNAME = '{{ org.fullname | default(org.name | default("CDPNI")) }}'
 {# Persistida em arquivo: /dev/null gerava chave nova a cada run do
    playbook, derrubando todas as sessões logadas do portal. #}
 SECRET_KEY  = '{{ lookup("password", portal.dir ~ "/.secret_key chars=ascii_letters,digits length=64") }}'

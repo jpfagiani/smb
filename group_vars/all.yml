@@ -5,6 +5,14 @@
 # Nunca use este arquivo em produção sem alterar as senhas.
 # =============================================================================
 
+# Identidade da unidade — exibida no portal web e no certificado SSL.
+# Para instalar em outra unidade (ex.: PLAVII), o bootstrap pergunta
+# estes valores; nomes técnicos internos (serviço cdpni-portal, paths)
+# não mudam e não precisam mudar.
+org:
+  name:     "CDPNI"
+  fullname: "Centro de Detenção Provisória de Nova Independência"
+
 server:
   ip:         "10.14.29.11"
   mask:       "24"

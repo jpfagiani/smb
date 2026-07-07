@@ -24,6 +24,11 @@ add_if_missing() {
 
 echo "Verificando variaveis em group_vars/all.yml..."
 
+# Identidade da unidade (exibida no portal e no certificado SSL)
+add_if_missing "org" "org:
+  name:     \"CDPNI\"
+  fullname: \"Centro de Detencao Provisoria de Nova Independencia\""
+
 # Redes permitidas no firewall (nftables usa auto-merge; sobreposicoes OK).
 # Sem esta secao o template nftables.conf.j2 falha por variavel indefinida.
 add_if_missing "network_ranges" "network_ranges:

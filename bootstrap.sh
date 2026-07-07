@@ -251,6 +251,17 @@ done
 ask "Domínio local [cdpni.local]:"
 read -rp "  > " _IN; DOMAIN="${_IN:-cdpni.local}"
 
+# Identidade da unidade (aparece no portal web e no certificado SSL)
+_ORG_RE='^[A-Za-z0-9][A-Za-z0-9 ._-]{0,29}$'
+while true; do
+    ask "Sigla da unidade (ex: CDPNI, PLAVII) [CDPNI]:"
+    read -rp "  > " _IN; ORG_SIGLA="${_IN:-CDPNI}"
+    [[ "$ORG_SIGLA" =~ $_ORG_RE ]] && break
+    warn "Sigla inválida (letras, dígitos, espaço, . _ -; até 30 caracteres)"
+done
+ask "Nome da unidade por extenso [${ORG_SIGLA}]:"
+read -rp "  > " _IN; ORG_NOME="${_IN:-$ORG_SIGLA}"
+
 # Admin user
 while true; do
     ask "Login do administrador [sambadmin]:"
@@ -352,6 +363,7 @@ printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "Gateway:"         "${
 printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "DNS:"             "${DNS}"
 printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "Interface:"       "${SERVER_IFACE}"
 printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "Hostname:"        "${HOSTNAME}.${DOMAIN}"
+printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "Unidade:"         "${ORG_SIGLA}"
 printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "Admin:"           "${ADMIN_USER}"
 printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "Senha Samba:"     "$(printf '*%.0s' {1..${#SAMBA_PASS}})"
 printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "Senha Painel:"    "$(printf '*%.0s' {1..${#PANEL_PASS}})"
@@ -387,8 +399,17 @@ _RANGES_YAML=""
 for _r in "${_REDES_PADRAO[@]}"; do _RANGES_YAML+="  - \"${_r}\""$'\n'; done
 [[ "$_COBERTA" == "nao" ]] && _RANGES_YAML+="  - \"${_NET_ESCOLHIDA}\""$'\n'
 
+# Remove aspas duplas do nome para não quebrar o YAML
+ORG_NOME="${ORG_NOME//\"/}"
+ORG_SIGLA="${ORG_SIGLA//\"/}"
+
 cat > "${SCRIPT_DIR}/group_vars/all.yml" << YAML
 # Gerado por bootstrap.sh em $(date)
+# Identidade da unidade — exibida no portal web e no certificado SSL
+org:
+  name:     "${ORG_SIGLA}"
+  fullname: "${ORG_NOME}"
+
 server:
   ip:         "${SAMBA_IP}"
   mask:       "${SAMBA_MASK}"
@@ -428,7 +449,7 @@ ssl:
   days:     3650
   country:  BR
   state:    SP
-  org:      CDPNI
+  org:      "${ORG_SIGLA}"
 
 panel:
   dir:  /var/www/samba-panel

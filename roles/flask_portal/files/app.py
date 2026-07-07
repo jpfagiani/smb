@@ -14,6 +14,10 @@ app.config.from_pyfile('config.py')
 SECRET_KEY   = app.config['SECRET_KEY']
 SAMBA_ROOT   = app.config['SAMBA_ROOT']
 ADMIN_USERS  = set(app.config['ADMIN_USERS'])
+# Identidade da unidade (definida no bootstrap; fallback = CDPNI)
+ORG_NAME     = app.config.get('ORG_NAME', 'CDPNI')
+ORG_FULLNAME = app.config.get('ORG_FULLNAME', ORG_NAME)
+FQDN         = f"{app.config.get('SERVER_HOSTNAME', 'smb')}.{app.config.get('DOMAIN', 'local')}"
 PORTAL_DIR   = os.path.dirname(os.path.abspath(__file__))
 BANNER_DIR   = os.path.join(PORTAL_DIR, 'banners')
 SMB_CONF     = '/etc/samba/smb.conf'
@@ -522,7 +526,7 @@ pre.log-box{background:var(--bg3);border:0.5px solid var(--border);border-radius
 
 BASE_T = """<!DOCTYPE html><html lang="pt-BR">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CDPNI — Servidor</title>
+<title>__ORG_NAME__ — Servidor</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
 <style>""" + CSS + """</style></head>
 <body>
@@ -530,8 +534,8 @@ BASE_T = """<!DOCTYPE html><html lang="pt-BR">
   <div class="topbar-logo">
     <div class="logo-icon"><i class="ti ti-building-prison" aria-hidden="true"></i></div>
     <div>
-      Centro de Detenção Provisória de Nova Independência
-      <span class="logo-sub">Portal de Administração · smb.cdpni.local</span>
+      __ORG_FULLNAME__
+      <span class="logo-sub">Portal de Administração · __FQDN__</span>
     </div>
   </div>
   {% if session.logged_in %}
@@ -587,7 +591,7 @@ __BODY__
 </div>
 </div>
 <div class="statusbar">
-  <span>CDPNI — Centro de Detenção Provisória de Nova Independência</span>
+  <span>__ORG_NAME__ — __ORG_FULLNAME__</span>
   <span class="st-on"><span class="st-dot"></span>Samba ativo · RAID 5 saudável</span>
   <span>Portal v2.0 · Python Flask</span>
 </div>
@@ -604,14 +608,14 @@ document.addEventListener('keydown',function(e){
 
 LOGIN_T = """<!DOCTYPE html><html lang="pt-BR">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CDPNI — Login</title>
+<title>__ORG_NAME__ — Login</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
 <style>""" + CSS + """</style></head>
 <body>
 <div class="login-wrap"><div class="login-box">
   <div class="login-header">
     <div class="logo"><i class="ti ti-building-prison" style="color:#fff;font-size:22px"></i></div>
-    <h2>CDPNI</h2><p>Portal do Servidor</p>
+    <h2>__ORG_NAME__</h2><p>Portal do Servidor</p>
   </div>
   <form method="post" class="login-body">
     {% if error %}<div class="error-msg"><i class="ti ti-alert-circle"></i> {{ error }}</div>{% endif %}
@@ -621,6 +625,13 @@ LOGIN_T = """<!DOCTYPE html><html lang="pt-BR">
   </form>
 </div></div>
 </body></html>"""
+
+# Substitui a identidade da unidade nos templates (definida no config.py)
+for _ph, _val in (('__ORG_NAME__', ORG_NAME),
+                  ('__ORG_FULLNAME__', ORG_FULLNAME),
+                  ('__FQDN__', FQDN)):
+    BASE_T  = BASE_T.replace(_ph, _val)
+    LOGIN_T = LOGIN_T.replace(_ph, _val)
 
 # ── auth ───────────────────────────────────────────────────────────────────────
 @app.route('/login', methods=['GET', 'POST'])
@@ -1901,7 +1912,7 @@ BACKUPS_T = BASE_T.replace("__BODY__", """
         <div class="form-group" style="margin-top:.25rem">
           <label>Pasta de destino no compartilhamento</label>
           <div style="display:flex;gap:.5rem;align-items:center">
-            <input type="text" id="smbSub" name="smb_sub" placeholder="Backups\Servidor (opcional)"
+            <input type="text" id="smbSub" name="smb_sub" placeholder="Backups\\Servidor (opcional)"
                    style="flex:1;font-family:var(--mono);font-size:.82rem">
             <button type="button" class="btn" onclick="smbBrowse('')" style="white-space:nowrap">
               📂 Navegar
