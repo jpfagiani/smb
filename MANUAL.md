@@ -383,9 +383,36 @@ sudo mdadm --detail /dev/md0
 
 ---
 
+## 6.1 Trocar o IP do Servidor
+
+Use **sempre** o script dedicado — nunca edite `/etc/network/interfaces` na mão:
+
+```bash
+sudo bash change-ip.sh 10.14.29.8
+# ou interativo:
+sudo bash change-ip.sh
+```
+
+Garantias do script:
+
+1. Lê e grava o `group_vars/all.yml` com YAML de verdade (python3) — se algum valor não puder ser lido, **aborta sem alterar nada**
+2. Valida que o gateway pertence à sub-rede nova (gateway errado = servidor sem rota no boot)
+3. Se a rede nova não estiver nas redes permitidas do firewall, adiciona automaticamente a `network_ranges`
+4. Em sessão SSH, roda o playbook via `systemd-run` — **desacoplado da sessão**: se o SSH cair na troca, a aplicação continua até o fim (`tail -f /var/log/cdpni_change_ip.log` para acompanhar)
+5. O role de rede valida o novo `interfaces` com `ifquery` antes de gravar, aplica com `ip addr replace` (novo IP antes de remover o antigo) e **nunca** reinicia o serviço networking
+
+**Redes suportadas:** a padrão é `10.14.29.0/24` (privada RFC 1918). As faixas `172.14.29.0/24` e `192.14.29.0/24` também já estão liberadas no firewall (`network_ranges` no `group_vars/all.yml`) — atenção: são endereços **públicos** reutilizados internamente; funciona atrás do gateway GWOS, mas sites reais da internet nessas faixas ficam inacessíveis a partir da rede local.
+
+Depois da troca, atualize o DNS no gateway: `gwos dns update cdpni <novo-ip>`.
+
+---
+
 ## 7. Segurança
 
 ### Firewall (nftables)
+
+Acesso permitido apenas das redes internas definidas em `network_ranges`
+(`group_vars/all.yml`): faixas RFC 1918 + `172.14.29.0/24` + `192.14.29.0/24`.
 
 Portas abertas por padrão:
 - **22** — SSH (altere para outra porta em produção)
