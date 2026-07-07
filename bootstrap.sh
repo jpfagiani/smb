@@ -66,28 +66,27 @@ echo -e "  ${DIM}$(printf '─%.0s' {1..68})${NC}"
 declare -A IFACE_IP IFACE_CIDR
 declare -a IFACE_LIST=()
 
-while IFS= read -r _line; do
-    _iface=$(awk '{print $1}' <<< "$_line")
-    _cidr=$(awk '{print $2}' <<< "$_line")
-    _ip="${_cidr%%/*}"; _prefix="${_cidr##*/}"
-    _net=$(python3 -c "import ipaddress; print(str(ipaddress.ip_interface('${_cidr}').network))" 2>/dev/null || echo "-")
+# Lista TODAS as interfaces físicas — inclusive as SEM IP, pois a
+# interface que se quer configurar pode estar exatamente sem endereço.
+while IFS= read -r _iface; do
+    _cidr=$(ip -4 -o addr show "$_iface" 2>/dev/null | awk '{print $4}' | head -1)
+    if [[ -n "$_cidr" ]]; then
+        _ip="${_cidr%%/*}"; _prefix="${_cidr##*/}"
+        _net=$(python3 -c "import ipaddress; print(str(ipaddress.ip_interface('${_cidr}').network))" 2>/dev/null || echo "-")
+    else
+        _ip=""; _prefix="24"; _net="-"
+    fi
     IFACE_LIST+=("$_iface")
     IFACE_IP[$_iface]="$_ip"
     IFACE_CIDR[$_iface]="$_prefix"
     _idx=${#IFACE_LIST[@]}
-    printf "  ${GREEN}[%-2s]${NC} %-14s %-18s /%-5s %-20s\n" "$_idx" "$_iface" "$_ip" "$_prefix" "$_net"
-done < <(ip -4 addr show 2>/dev/null | awk '
-    /^[0-9]+:/ { iface=$2; gsub(/:$/,"",iface) }
-    /inet / {
-        ip=$2
-        if (ip ~ /^10\./ || ip ~ /^172\.(1[6-9]|2[0-9]|3[01])\./ || ip ~ /^192\.168\./)
-            print iface, ip
-    }
-' | grep -v '^lo ')
+    printf "  ${GREEN}[%-2s]${NC} %-14s %-18s /%-5s %-20s\n" "$_idx" "$_iface" "${_ip:-sem IP}" "$_prefix" "$_net"
+done < <(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | cut -d@ -f1 \
+         | grep -Ev '^(lo|docker|veth|br-|virbr|tun|tap|wg)' | sort)
 
 # Verifica se detectou alguma interface
 if [[ ${#IFACE_LIST[@]} -eq 0 ]]; then
-    warn "Nenhuma interface privada detectada."
+    warn "Nenhuma interface física detectada."
     echo ""
     ask "Informe manualmente a interface de rede (ex: eth0, ens18):"
     read -rp "  > " _MANUAL_IFACE
@@ -137,11 +136,13 @@ fi
 ok "Interface selecionada: ${SERVER_IFACE}  (IP atual: ${_BEST_IP:-não configurado})"
 
 # Sugestão de IP para o servidor (.11 na mesma sub-rede)
+# Rede padrão CDPNI: 10.14.29.0/24 (faixas alternativas: 172.14.29.0/24
+# e 192.14.29.0/24 — já liberadas no firewall via network_ranges)
 if [[ -n "${_BEST_IP:-}" ]]; then
     _NET_PFX="${_BEST_IP%.*}"
     _IP_SUG="${_NET_PFX}.11"
 else
-    _IP_SUG="192.168.0.11"
+    _IP_SUG="10.14.29.11"
     _BEST_MASK="24"
 fi
 
@@ -215,13 +216,23 @@ while true; do
     warn "CIDR inválido (1-30)"
 done
 
-# Gateway
+# Gateway — precisa pertencer à sub-rede do servidor, senão o ifup
+# falha no boot e a máquina fica sem rede
+gw_na_rede() {
+    python3 -c "import ipaddress, sys
+sys.exit(0 if ipaddress.ip_address('$1') in ipaddress.ip_network('${SAMBA_IP}/${SAMBA_MASK}', strict=False) else 1)" 2>/dev/null
+}
 _GW_SUG="${SAMBA_IP%.*}.1"
+gw_na_rede "$_GW_SUG" || _GW_SUG=""
 while true; do
-    ask "Gateway [${_GW_SUG}]:"
+    ask "Gateway${_GW_SUG:+ [${_GW_SUG}]}:"
     read -rp "  > " _IN; GATEWAY="${_IN:-$_GW_SUG}"
-    valid_ip "$GATEWAY" && break
-    warn "Gateway inválido"
+    if ! valid_ip "$GATEWAY"; then warn "Gateway inválido"; continue; fi
+    if ! gw_na_rede "$GATEWAY"; then
+        warn "Gateway ${GATEWAY} está FORA da rede ${SAMBA_IP}/${SAMBA_MASK} — deixaria o servidor sem rota no boot."
+        continue
+    fi
+    break
 done
 
 # DNS
@@ -326,11 +337,8 @@ while true; do
     warn "Nível inválido para ${N} disco(s). Opções: ${RAID_OPTS[*]}"
 done
 
-# Atualiza SERVER_IFACE caso o IP digitado seja de outra sub-rede
-for _if in "${!IFACE_IP[@]}"; do
-    _net_pfx="${IFACE_IP[$_if]%.*}"
-    [[ "${SAMBA_IP%.*}" == "$_net_pfx" ]] && SERVER_IFACE="$_if"
-done
+# A interface é a que o usuário selecionou explicitamente — sem remapeamento
+# automático por prefixo de IP (mudava a interface de forma silenciosa).
 
 # =============================================================================
 # CONFIRMAÇÃO
@@ -363,6 +371,22 @@ mkdir -p "${SCRIPT_DIR}/group_vars"
 _DISKS_YAML=""
 for _d in "${RAID_DISKS[@]}"; do _DISKS_YAML+="    - ${_d}"$'\n'; done
 
+# Redes permitidas no firewall: RFC 1918 + faixas legadas CDPNI.
+# Se a rede escolhida não estiver coberta por nenhuma delas, é incluída —
+# sem isso o nftables (policy drop) bloquearia todo o acesso ao servidor.
+_REDES_PADRAO=("10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" "172.14.29.0/24" "192.14.29.0/24")
+_NET_ESCOLHIDA=$(python3 -c "import ipaddress; print(ipaddress.ip_network('${SAMBA_IP}/${SAMBA_MASK}', strict=False))")
+_RANGES_PY=$(printf "'%s'," "${_REDES_PADRAO[@]}")
+_COBERTA=$(python3 -c "
+import ipaddress
+net = ipaddress.ip_network('${_NET_ESCOLHIDA}')
+ranges = [${_RANGES_PY}]
+print('sim' if any(net.subnet_of(ipaddress.ip_network(r)) for r in ranges) else 'nao')
+")
+_RANGES_YAML=""
+for _r in "${_REDES_PADRAO[@]}"; do _RANGES_YAML+="  - \"${_r}\""$'\n'; done
+[[ "$_COBERTA" == "nao" ]] && _RANGES_YAML+="  - \"${_NET_ESCOLHIDA}\""$'\n'
+
 cat > "${SCRIPT_DIR}/group_vars/all.yml" << YAML
 # Gerado por bootstrap.sh em $(date)
 server:
@@ -375,6 +399,11 @@ server:
   admin_user: "${ADMIN_USER}"
   iface:      "${SERVER_IFACE}"
 
+# Redes com acesso permitido aos serviços (nftables usa auto-merge,
+# sobreposições são aceitas). Faixas 172.14.x/192.14.x são endereços
+# públicos reutilizados internamente pelo CDPNI.
+network_ranges:
+${_RANGES_YAML}
 raid:
   level:   ${RAID_LEVEL}
   mount:   /mnt/raid

@@ -6,14 +6,27 @@
 # =============================================================================
 
 server:
-  ip:         "192.168.0.11"
+  ip:         "10.14.29.11"
   mask:       "24"
-  gateway:    "192.168.0.1"
-  dns:        "192.168.0.1"
+  gateway:    "10.14.29.1"
+  dns:        "10.14.29.1"
   hostname:   "cdpni"
   domain:     "cdpni.local"
   admin_user: "sambadmin"
   iface:      "eth0"
+
+# Redes com acesso permitido aos serviços (SSH, SMB, portal, painel).
+# Além das faixas privadas RFC 1918, inclui as faixas legadas do CDPNI
+# que ficam FORA do espaço privado: 172.14.29.0/24 e 192.14.29.0/24 são
+# endereços PÚBLICOS reutilizados internamente — funciona atrás do
+# gateway, mas sites reais da internet nessas faixas ficam inacessíveis.
+# Sobreposições entre faixas são permitidas (o nftables usa auto-merge).
+network_ranges:
+  - "10.0.0.0/8"        # RFC 1918 — cobre a rede padrão 10.14.29.0/24
+  - "172.16.0.0/12"     # RFC 1918
+  - "192.168.0.0/16"    # RFC 1918
+  - "172.14.29.0/24"    # faixa CDPNI legada (fora do RFC 1918)
+  - "192.14.29.0/24"    # faixa CDPNI legada (fora do RFC 1918)
 
 raid:
   level:   5

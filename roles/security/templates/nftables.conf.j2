@@ -5,10 +5,6 @@
 
 flush ruleset
 
-# ── Conjuntos de endereços ────────────────────────────────────────────────────
-# Redes internas permitidas: RFC1918 + 172.0.0.0/8 completo (cobre 172.14.x, 172.15.x etc.)
-define RFC1918 = { 10.0.0.0/8, 172.0.0.0/8, 192.168.0.0/16 }
-
 # ── Portas por serviço ────────────────────────────────────────────────────────
 define SSH_PORT   = 22
 define SMB_PORTS  = { 139, 445 }   # SMB/CIFS (TCP)
@@ -17,6 +13,17 @@ define WEB_PORTS  = { 80, 443, 8443 }  # Portal (80→443) + painel admin (8443)
 define FLASK_PORT = 5000           # Flask interno — apenas loopback
 
 table inet cdpni {
+
+    # ── Redes internas permitidas ─────────────────────────────────────────────
+    # Definidas em group_vars/all.yml (network_ranges): faixas RFC 1918 +
+    # faixas legadas CDPNI fora do espaço privado (172.14.29.0/24, 192.14.29.0/24).
+    # auto-merge resolve sobreposições (ex.: 10.14.29.0/24 dentro de 10.0.0.0/8).
+    set redes_internas {
+        type ipv4_addr
+        flags interval
+        auto-merge
+        elements = { {{ network_ranges | join(', ') }} }
+    }
 
     # ── Conexões SSH recentes (anti-brute force) ──────────────────────────────
     # Permite no máximo 4 novas conexões SSH por minuto por IP de origem.
@@ -40,25 +47,25 @@ table inet cdpni {
 
         # ── ICMP ─────────────────────────────────────────────────────────────
         # Ping e diagnóstico de rede (apenas redes internas)
-        ip  protocol icmp   ip  saddr $RFC1918 accept
-        ip6 nexthdr  icmpv6 ip6 saddr ::/0     accept
+        ip  protocol icmp   ip  saddr @redes_internas accept
+        ip6 nexthdr  icmpv6 ip6 saddr ::/0             accept
 
         # ── SSH ───────────────────────────────────────────────────────────────
         # Rate-limit: máx 4 conexões novas/minuto por IP (bloqueia brute-force)
-        tcp dport $SSH_PORT ip saddr $RFC1918 \
+        tcp dport $SSH_PORT ip saddr @redes_internas \
             ct state new \
             add @ssh_ratelimit { ip saddr limit rate 4/minute } accept
-        tcp dport $SSH_PORT ip saddr $RFC1918 \
+        tcp dport $SSH_PORT ip saddr @redes_internas \
             ct state new drop
 
         # ── Samba SMB/CIFS (TCP) ─────────────────────────────────────────────
-        tcp dport $SMB_PORTS ip saddr $RFC1918 accept
+        tcp dport $SMB_PORTS ip saddr @redes_internas accept
 
         # ── Samba NetBIOS (UDP) ───────────────────────────────────────────────
-        udp dport $NB_PORTS  ip saddr $RFC1918 accept
+        udp dport $NB_PORTS  ip saddr @redes_internas accept
 
         # ── Portal (80/443) e painel admin (8443) ────────────────────────────
-        tcp dport $WEB_PORTS ip saddr $RFC1918 accept
+        tcp dport $WEB_PORTS ip saddr @redes_internas accept
 
         # ── Flask interno ─────────────────────────────────────────────────────
         # Porta 5000 acessível apenas localmente (nginx faz o proxy para 443)

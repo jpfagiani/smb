@@ -12,11 +12,12 @@
   changed_when: false
 
 
-- name: Implantar ruleset nftables
+- name: Implantar ruleset nftables (validado com nft -c antes de instalar)
   ansible.builtin.template:
     src: nftables.conf.j2
     dest: /etc/nftables.conf
     mode: "0640"
+    validate: /usr/sbin/nft -c -f %s
   notify: reload nftables
 
 - name: Habilitar e iniciar nftables
