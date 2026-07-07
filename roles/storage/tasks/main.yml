@@ -1,20 +1,35 @@
 ---
-# Trava de segurança: se já existe QUALQUER array md ativo na máquina,
-# nada de zerar superbloco — isso destruiria os dados num re-run do
-# playbook (ex.: array montado como /dev/md127 após um boot atípico,
-# quando o creates: {{ raid.device }} não protegeria).
-- name: Verificar se já existe RAID ativo
-  ansible.builtin.shell: grep -q '^md' /proc/mdstat && echo sim || echo nao
-  register: raid_ativo
+# Trava de segurança: o critério é o PONTO DE MONTAGEM.
+#   - RAID montado em {{ raid.mount }} = servidor em produção →
+#     nenhuma operação destrutiva roda (re-run seguro).
+#   - Nada montado = instalação limpa → arrays residuais de instalações
+#     anteriores (ex.: auto-montados como /dev/md127 no boot, que deixam
+#     os discos "busy" para o mdadm --create) são parados e os discos
+#     limpos, como o bootstrap avisa ("todos os dados serão apagados").
+- name: Verificar se o RAID já está montado (produção)
+  ansible.builtin.command: findmnt -n {{ raid.mount }}
+  register: raid_montado
+  failed_when: false
   changed_when: false
 
-- name: Zerar superbloco dos discos (apenas instalação limpa, sem RAID ativo)
+- name: Parar arrays md residuais nos discos selecionados (instalação limpa)
+  ansible.builtin.shell: |
+    for md in $(awk '/^md/{print $1}' /proc/mdstat); do
+        if mdadm --detail "/dev/$md" 2>/dev/null | grep -qE '{{ raid.devices | join("|") }}'; then
+            umount -f "/dev/$md" 2>/dev/null || true
+            mdadm --stop "/dev/$md"
+        fi
+    done
+  when: raid_montado.rc != 0
+  changed_when: true
+
+- name: Zerar superbloco dos discos (instalação limpa)
   ansible.builtin.shell: |
     mdadm --zero-superblock --force {{ item }} 2>/dev/null || true
     wipefs -af {{ item }} 2>/dev/null || true
   loop: "{{ raid.devices }}"
   changed_when: true
-  when: raid_ativo.stdout == "nao"
+  when: raid_montado.rc != 0
 
 - name: Criar array RAID {{ raid.level }}
   ansible.builtin.shell: |
@@ -27,12 +42,21 @@
       {{ raid.devices | join(' ') }}
   args:
     creates: "{{ raid.device }}"
+  when: raid_montado.rc != 0
   register: raid_created
 
 - name: Aguardar dispositivo RAID ficar disponível
   ansible.builtin.wait_for:
     path: "{{ raid.device }}"
     timeout: 60
+  when: raid_montado.rc != 0
+
+# Em produção o array pode ter outro nome (ex.: /dev/md127) — usa o
+# dispositivo realmente montado; na instalação limpa, o raid.device.
+- name: Determinar dispositivo real do RAID
+  ansible.builtin.shell: findmnt -n -o SOURCE {{ raid.mount }} 2>/dev/null || echo {{ raid.device }}
+  register: raid_dev_real
+  changed_when: false
 
 - name: Acelerar sincronização inicial do RAID
   ansible.builtin.shell: echo 200000 > /proc/sys/dev/raid/speed_limit_min
@@ -53,7 +77,7 @@
 # filesystem — o creates: .formatted só protege com o RAID montado;
 # desmontado, um re-run formataria um array cheio de dados.
 - name: Verificar filesystem existente no RAID
-  ansible.builtin.command: blkid -s TYPE -o value {{ raid.device }}
+  ansible.builtin.command: blkid -s TYPE -o value {{ raid_dev_real.stdout | trim }}
   register: raid_fs
   failed_when: false
   changed_when: false
@@ -82,14 +106,17 @@
     mode: "0755"
 
 - name: Obter UUID do RAID
-  ansible.builtin.command: blkid -s UUID -o value {{ raid.device }}
+  ansible.builtin.command: blkid -s UUID -o value {{ raid_dev_real.stdout | trim }}
   register: raid_uuid
   changed_when: false
 
+# regexp ancora no ponto de montagem: uma reinstalação gera UUID novo e
+# o antigo padrão ({{ raid.device }}) não casava com a linha UUID=…,
+# acumulando entradas duplicadas no fstab
 - name: Adicionar RAID ao fstab
   ansible.builtin.lineinfile:
     path: /etc/fstab
-    regexp: "{{ raid.device }}"
+    regexp: '^\S+\s+{{ raid.mount }}\s'
     line: "UUID={{ raid_uuid.stdout }}  {{ raid.mount }}  xfs  defaults,noatime,nodiratime,allocsize=64m,largeio  0  2"
     state: present
 

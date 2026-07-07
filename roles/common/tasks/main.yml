@@ -36,6 +36,11 @@
       - mailutils
       - postfix
       - chrony
+      # ifupdown garante ifup/ifquery/networking.service para o
+      # /etc/network/interfaces gerado pelo role network
+      - ifupdown
+      # python3-yaml é usado pelo change-ip.sh (parse do all.yml)
+      - python3-yaml
     state: present
 
 - name: Configurar postfix (local only)

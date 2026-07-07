@@ -44,6 +44,17 @@
     mode: "0644"
   notify: restart fail2ban
 
+# A jail do portal precisa que o logpath exista, senão o fail2ban falha
+# ao iniciar ("Have not found any log file"). O dono correto (usuário do
+# portal) é ajustado depois pelo role flask_portal.
+- name: Garantir logfile do portal para a jail do Fail2ban
+  ansible.builtin.file:
+    path: /var/log/cdpni_portal_access.log
+    state: touch
+    mode: "0664"
+    access_time: preserve
+    modification_time: preserve
+
 - name: Configurar Fail2ban — jail Portal Flask
   ansible.builtin.template:
     src: portal-jail.conf.j2

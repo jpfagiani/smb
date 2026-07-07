@@ -30,14 +30,16 @@
     - role: network
       tags: [network]
 
+    # security antes do storage: o firewall (nftables) sobe cedo e fica
+    # ativo mesmo que um role posterior falhe no meio da instalação
+    - role: security
+      tags: [security, firewall]
+
     - role: storage
       tags: [storage, raid]
 
     - role: samba
       tags: [samba]
-
-    - role: security
-      tags: [security, firewall]
 
     - role: flask_portal
       tags: [portal, flask]
