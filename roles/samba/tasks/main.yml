@@ -26,14 +26,22 @@
     group: "{{ item.group | default('grp_' + (item.name | lower)) }}"
     create_home: false
     password: "{{ samba.default_pass | password_hash('sha512') }}"
+    update_password: on_create
   loop: "{{ samba_shares }}"
   no_log: true
 
+# A senha só é definida quando o usuário ainda NÃO existe no Samba —
+# reaplicar o playbook (ex.: via change-ip.sh) não pode resetar senhas
+# que os usuários já trocaram pelo portal.
 - name: Registrar usuários dos compartilhamentos no Samba
   ansible.builtin.shell: |
-    printf '%s\n%s\n' '{{ samba.default_pass }}' '{{ samba.default_pass }}' \
-      | smbpasswd -s -a {{ item.user | default(item.name | lower) }} 2>/dev/null || true
-    smbpasswd -e {{ item.user | default(item.name | lower) }} 2>/dev/null || true
+    U='{{ item.user | default(item.name | lower) }}'
+    if ! pdbedit -u "$U" >/dev/null 2>&1; then
+        printf '%s\n%s\n' "$SMBPASS" "$SMBPASS" | smbpasswd -s -a "$U"
+    fi
+    smbpasswd -e "$U" 2>/dev/null || true
+  environment:
+    SMBPASS: "{{ samba.default_pass }}"
   loop: "{{ samba_shares }}"
   changed_when: false
   no_log: true
@@ -49,6 +57,7 @@
     append: false
     create_home: true
     password: "{{ samba.default_pass | password_hash('sha512') }}"
+    update_password: on_create
   no_log: true
 
 - name: Criar usuários operacionais (jpfagiani, rcborges, cpd, supervisao)
@@ -61,22 +70,31 @@
     append: false
     create_home: true
     password: "{{ samba.default_pass | password_hash('sha512') }}"
+    update_password: on_create
   loop: "{{ samba_users }}"
   no_log: true
 
 - name: Registrar admin do servidor no Samba
   ansible.builtin.shell: |
-    printf '%s\n%s\n' '{{ samba.default_pass }}' '{{ samba.default_pass }}' \
-      | smbpasswd -s -a {{ server.admin_user }} 2>/dev/null || true
-    smbpasswd -e {{ server.admin_user }} 2>/dev/null || true
+    U='{{ server.admin_user }}'
+    if ! pdbedit -u "$U" >/dev/null 2>&1; then
+        printf '%s\n%s\n' "$SMBPASS" "$SMBPASS" | smbpasswd -s -a "$U"
+    fi
+    smbpasswd -e "$U" 2>/dev/null || true
+  environment:
+    SMBPASS: "{{ samba.default_pass }}"
   changed_when: false
   no_log: true
 
 - name: Registrar usuários operacionais no Samba
   ansible.builtin.shell: |
-    printf '%s\n%s\n' '{{ samba.default_pass }}' '{{ samba.default_pass }}' \
-      | smbpasswd -s -a {{ item.login }} 2>/dev/null || true
-    smbpasswd -e {{ item.login }} 2>/dev/null || true
+    U='{{ item.login }}'
+    if ! pdbedit -u "$U" >/dev/null 2>&1; then
+        printf '%s\n%s\n' "$SMBPASS" "$SMBPASS" | smbpasswd -s -a "$U"
+    fi
+    smbpasswd -e "$U" 2>/dev/null || true
+  environment:
+    SMBPASS: "{{ samba.default_pass }}"
   loop: "{{ samba_users }}"
   changed_when: false
   no_log: true

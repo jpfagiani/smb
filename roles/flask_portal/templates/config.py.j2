@@ -3,7 +3,9 @@ SAMBA_ROOT  = '{{ raid.mount }}/shares'
 ADMIN_USERS = ['{{ server.admin_user }}', 'cpd', 'supervisao']
 SERVER_IP   = '{{ server.ip }}'
 DOMAIN      = '{{ server.domain }}'
-SECRET_KEY  = '{{ lookup("password", "/dev/null chars=ascii_letters,digits length=64") }}'
+{# Persistida em arquivo: /dev/null gerava chave nova a cada run do
+   playbook, derrubando todas as sessões logadas do portal. #}
+SECRET_KEY  = '{{ lookup("password", portal.dir ~ "/.secret_key chars=ascii_letters,digits length=64") }}'
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SECURE   = True
 PERMANENT_SESSION_LIFETIME = 3600

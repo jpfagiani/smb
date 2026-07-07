@@ -59,4 +59,6 @@ add_if_missing "panel" "panel:
 
 echo ""
 echo "Pronto. Execute:"
-echo "  ansible-playbook -i inventory/hosts.ini site.yml --tags samba,security,php_panel,flask_portal"
+# php_panel fica FORA da lista: o role nao esta no site.yml (o portal Flask
+# o substituiu) e aplica-lo criaria conflito com o portal na porta 8443.
+echo "  ansible-playbook -i inventory/hosts.ini site.yml --tags samba,security,portal"

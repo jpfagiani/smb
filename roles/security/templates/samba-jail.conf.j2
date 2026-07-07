@@ -1,5 +1,11 @@
+# DESATIVADA de propósito:
+#  - o fail2ban não traz um filtro "samba" (filter.d/samba.conf não existe)
+#  - o Samba loga por máquina (log.%m) — o logpath log.samba nunca existe
+# Com filter/logpath inexistentes a jail quebra e pode impedir o fail2ban
+# de iniciar. Para ativar de verdade seria preciso criar um filtro próprio
+# e habilitar auth_audit no smb.conf.
 [samba]
-enabled  = true
+enabled  = false
 port     = 445,139
 protocol = tcp
 filter   = samba
@@ -7,4 +13,4 @@ logpath  = /var/log/samba/log.%(__name__)s
 maxretry = 5
 bantime  = 3600
 findtime = 600
-ignoreip = 127.0.0.1/8 {{ server.ip | regex_replace('\.[0-9]+$', '.0') }}/{{ server.mask }}
+ignoreip = 127.0.0.1/8

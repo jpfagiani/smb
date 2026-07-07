@@ -1,10 +1,20 @@
 ---
-- name: Zerar superbloco dos discos
+# Trava de segurança: se já existe QUALQUER array md ativo na máquina,
+# nada de zerar superbloco — isso destruiria os dados num re-run do
+# playbook (ex.: array montado como /dev/md127 após um boot atípico,
+# quando o creates: {{ raid.device }} não protegeria).
+- name: Verificar se já existe RAID ativo
+  ansible.builtin.shell: grep -q '^md' /proc/mdstat && echo sim || echo nao
+  register: raid_ativo
+  changed_when: false
+
+- name: Zerar superbloco dos discos (apenas instalação limpa, sem RAID ativo)
   ansible.builtin.shell: |
     mdadm --zero-superblock --force {{ item }} 2>/dev/null || true
     wipefs -af {{ item }} 2>/dev/null || true
   loop: "{{ raid.devices }}"
   changed_when: true
+  when: raid_ativo.stdout == "nao"
 
 - name: Criar array RAID {{ raid.level }}
   ansible.builtin.shell: |
@@ -39,7 +49,16 @@
   ansible.builtin.command: update-initramfs -u -k all
   changed_when: true
 
-- name: Formatar RAID com XFS
+# Trava de segurança: nunca formatar se o dispositivo já tem um
+# filesystem — o creates: .formatted só protege com o RAID montado;
+# desmontado, um re-run formataria um array cheio de dados.
+- name: Verificar filesystem existente no RAID
+  ansible.builtin.command: blkid -s TYPE -o value {{ raid.device }}
+  register: raid_fs
+  failed_when: false
+  changed_when: false
+
+- name: Formatar RAID com XFS (apenas se ainda não tem filesystem)
   ansible.builtin.shell: |
     {% set n = raid.devices | length %}
     {% if raid.level == 5 %}
@@ -53,6 +72,7 @@
     {% endif %}
   args:
     creates: "{{ raid.mount }}/.formatted"
+  when: raid_fs.stdout | trim == ""
   register: xfs_format
 
 - name: Criar ponto de montagem

@@ -6,4 +6,6 @@ logpath  = /var/log/cdpni_portal_access.log
 maxretry = 5
 bantime  = 1800
 findtime = 300
-ignoreip = 127.0.0.1/8 {{ server.ip | regex_replace('\.[0-9]+$', '.0') }}/{{ server.mask }}
+# Apenas localhost é isento — a versão anterior isentava a LAN inteira,
+# o que tornava a jail inútil (todos os clientes vêm da LAN).
+ignoreip = 127.0.0.1/8
