@@ -24,6 +24,15 @@ add_if_missing() {
 
 echo "Verificando variaveis em group_vars/all.yml..."
 
+# Redes permitidas no firewall (nftables usa auto-merge; sobreposicoes OK).
+# Sem esta secao o template nftables.conf.j2 falha por variavel indefinida.
+add_if_missing "network_ranges" "network_ranges:
+  - \"10.0.0.0/8\"        # RFC 1918 - cobre a rede padrao 10.14.29.0/24
+  - \"172.16.0.0/12\"     # RFC 1918
+  - \"192.168.0.0/16\"    # RFC 1918
+  - \"172.14.29.0/24\"    # faixa CDPNI legada (fora do RFC 1918)
+  - \"192.14.29.0/24\"    # faixa CDPNI legada (fora do RFC 1918)"
+
 add_if_missing "samba" "samba:
   workgroup:    \"WORKGROUP\"
   default_pass: \"Cdpni@2025\"
