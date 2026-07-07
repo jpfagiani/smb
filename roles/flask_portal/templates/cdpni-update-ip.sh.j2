@@ -54,8 +54,12 @@ openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
 echo "$CURRENT_IP" > "$IP_CACHE"
 
 # 5. Recarrega nginx (o portal sobe depois deste serviço)
-if systemctl is-active --quiet nginx; then
-    nginx -t 2>/dev/null && systemctl reload nginx && echo "  nginx recarregado"
+# IMPORTANTE: usa "nginx -s reload" (sinal direto ao master), NUNCA
+# "systemctl reload nginx" — o nginx é ordenado After= deste serviço,
+# então um reload via systemd espera este script terminar enquanto o
+# script espera o reload retornar: deadlock que trava o boot/instalação.
+if pidof nginx >/dev/null 2>&1; then
+    nginx -t 2>/dev/null && nginx -s reload && echo "  nginx recarregado"
 fi
 
 # Garante que o resolv.conf não ficou imutável (versões antigas usavam chattr +i,

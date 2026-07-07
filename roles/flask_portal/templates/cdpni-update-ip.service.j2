@@ -8,6 +8,8 @@ Before=nginx.service cdpni-portal.service
 Type=oneshot
 ExecStart=/usr/local/bin/cdpni-update-ip.sh
 RemainAfterExit=yes
+# Nunca segurar o boot/instalação por mais de 60s, aconteça o que for
+TimeoutStartSec=60
 StandardOutput=journal
 StandardError=journal
 
