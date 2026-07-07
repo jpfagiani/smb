@@ -6,8 +6,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VARS="${SCRIPT_DIR}/group_vars/all.yml"
 
 if [ ! -f "$VARS" ]; then
-    echo "ERRO: $VARS nao encontrado. Execute bootstrap.sh primeiro."
-    exit 1
+    if [ -f "${VARS}.example" ]; then
+        cp "${VARS}.example" "$VARS"
+        echo "group_vars/all.yml criado a partir do exemplo — AJUSTE os valores (IP, senhas)!"
+    else
+        echo "ERRO: $VARS nao encontrado. Execute bootstrap.sh primeiro."
+        exit 1
+    fi
 fi
 
 add_if_missing() {

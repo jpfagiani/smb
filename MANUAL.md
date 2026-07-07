@@ -51,6 +51,16 @@ Se usar chave SSH:
 
 ### Passo 3 — Configurar as variáveis
 
+O `bootstrap.sh` gera o `group_vars/all.yml` automaticamente com as respostas
+interativas — este passo manual só é necessário se você **não** usar o bootstrap.
+
+O arquivo real fica **fora do git** (contém IP e senhas do ambiente; um
+`git pull` nunca o sobrescreve). Crie a partir do exemplo versionado:
+
+```bash
+cp group_vars/all.yml.example group_vars/all.yml
+```
+
 Edite `group_vars/all.yml` com os valores do ambiente:
 
 ```yaml

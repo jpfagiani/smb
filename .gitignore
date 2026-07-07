@@ -1,3 +1,4 @@
 __pycache__/
 *.pyc
 group_vars/all.yml.bak.*
+group_vars/all.yml
