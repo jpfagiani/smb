@@ -1,12 +1,28 @@
 ---
-# Trava de segurança: o critério é o PONTO DE MONTAGEM.
-#   - RAID montado em {{ raid.mount }} = servidor em produção →
-#     nenhuma operação destrutiva roda (re-run seguro).
-#   - Nada montado = instalação limpa → arrays residuais de instalações
-#     anteriores (ex.: auto-montados como /dev/md127 no boot, que deixam
-#     os discos "busy" para o mdadm --create) são parados e os discos
-#     limpos, como o bootstrap avisa ("todos os dados serão apagados").
-- name: Verificar se o RAID já está montado (produção)
+# Trava de segurança: o critério é "existe um RAID utilizável?".
+#   1. Se {{ raid.mount }} não está montado mas existe um filesystem
+#      SAMBA_DATA íntegro, tenta montá-lo — servidor em produção após
+#      um boot atípico é aproveitado, nunca destruído.
+#   2. Montado (já estava, ou montou agora) = produção →
+#      nenhuma operação destrutiva roda (re-run seguro).
+#   3. Não montável = instalação limpa → arrays residuais são parados,
+#      discos limpos e o RAID recriado E SEMPRE formatado (um wipefs nos
+#      membros não apaga o superbloco XFS antigo no meio da área de
+#      dados — esse "filesystem fantasma" reaparece no array novo e,
+#      sem formatar, o mount falha com "superbloco inválido").
+- name: Tentar aproveitar RAID existente (proteção de dados)
+  ansible.builtin.shell: |
+    if ! findmnt -n {{ raid.mount }} >/dev/null 2>&1; then
+        dev=$(blkid -L SAMBA_DATA 2>/dev/null || true)
+        if [ -n "$dev" ]; then
+            mkdir -p {{ raid.mount }}
+            mount "$dev" {{ raid.mount }} 2>/dev/null || true
+        fi
+    fi
+  changed_when: false
+  failed_when: false
+
+- name: Verificar se o RAID está montado (produção)
   ansible.builtin.command: findmnt -n {{ raid.mount }}
   register: raid_montado
   failed_when: false
@@ -73,16 +89,10 @@
   ansible.builtin.command: update-initramfs -u -k all
   changed_when: true
 
-# Trava de segurança: nunca formatar se o dispositivo já tem um
-# filesystem — o creates: .formatted só protege com o RAID montado;
-# desmontado, um re-run formataria um array cheio de dados.
-- name: Verificar filesystem existente no RAID
-  ansible.builtin.command: blkid -s TYPE -o value {{ raid_dev_real.stdout | trim }}
-  register: raid_fs
-  failed_when: false
-  changed_when: false
-
-- name: Formatar RAID com XFS (apenas se ainda não tem filesystem)
+# Formata SEMPRE na instalação limpa (array recém-criado pode exibir um
+# filesystem fantasma da instalação anterior — ver comentário no topo).
+# Com o RAID montado (produção) esta task nunca roda.
+- name: Formatar RAID com XFS (instalação limpa)
   ansible.builtin.shell: |
     {% set n = raid.devices | length %}
     {% if raid.level == 5 %}
@@ -94,9 +104,7 @@
     {% else %}
     mkfs.xfs -f -L SAMBA_DATA {{ raid.device }}
     {% endif %}
-  args:
-    creates: "{{ raid.mount }}/.formatted"
-  when: raid_fs.stdout | trim == ""
+  when: raid_montado.rc != 0
   register: xfs_format
 
 - name: Criar ponto de montagem
