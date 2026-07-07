@@ -1,4 +1,38 @@
 ---
+# A rede é aplicada SEM "systemctl restart networking" e SEM "ip addr flush":
+#   1. valida interface e gateway ANTES de qualquer alteração
+#   2. gera o novo interfaces em arquivo temporário e valida com ifquery
+#   3. faz backup do atual e só então instala o arquivo validado
+#   4. adiciona o IP novo antes de remover os antigos — a interface nunca
+#      fica sem IP; a persistência no reboot vem do arquivo já validado
+
+- name: Verificar que a interface {{ server.iface }} existe
+  ansible.builtin.command: ip link show {{ server.iface }}
+  changed_when: false
+
+- name: Verificar que o gateway pertence à sub-rede do servidor
+  ansible.builtin.command: >
+    python3 -c "import ipaddress, sys;
+    sys.exit(0 if ipaddress.ip_address('{{ server.gateway }}')
+    in ipaddress.ip_network('{{ server.ip }}/{{ server.mask }}', strict=False)
+    else 1)"
+  changed_when: false
+
+- name: Gerar novo interfaces em arquivo temporário
+  ansible.builtin.template:
+    src: interfaces.j2
+    dest: /etc/network/interfaces.cdpni.new
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Validar sintaxe do novo interfaces (ifquery)
+  ansible.builtin.shell: |
+    if command -v ifquery >/dev/null 2>&1; then
+        ifquery --list --allow=auto -i /etc/network/interfaces.cdpni.new >/dev/null
+    fi
+  changed_when: false
+
 - name: Backup do interfaces atual
   ansible.builtin.copy:
     src: /etc/network/interfaces
@@ -7,30 +41,45 @@
     mode: "0644"
   ignore_errors: true
 
-- name: Configurar IP estático
-  ansible.builtin.template:
-    src: interfaces.j2
+- name: Instalar o interfaces validado
+  ansible.builtin.copy:
+    src: /etc/network/interfaces.cdpni.new
     dest: /etc/network/interfaces
+    remote_src: true
     owner: root
     group: root
     mode: "0644"
-  notify: reload networking
 
-- name: Desbloquear resolv.conf antes de qualquer alteração de rede
+- name: Remover arquivo temporário
+  ansible.builtin.file:
+    path: /etc/network/interfaces.cdpni.new
+    state: absent
+
+- name: Destravar resolv.conf (remove imutabilidade deixada por versões antigas)
   ansible.builtin.command: chattr -i /etc/resolv.conf
   ignore_errors: true
   changed_when: false
 
-- name: Aplicar IP imediatamente (sem reiniciar)
-  ansible.builtin.shell: |
-    ip addr flush dev {{ server.iface }} 2>/dev/null || true
-    ip addr add {{ server.ip }}/{{ server.mask }} dev {{ server.iface }} 2>/dev/null || true
-    ip link set {{ server.iface }} up
-    ip route replace default via {{ server.gateway }} dev {{ server.iface }} 2>/dev/null || true
-  changed_when: false
-  ignore_errors: true
+- name: Configurar resolv.conf
+  ansible.builtin.template:
+    src: resolv.conf.j2
+    dest: /etc/resolv.conf
+    owner: root
+    group: root
+    mode: "0644"
 
-- name: Bloquear resolv.conf contra sobrescrita (chattr +i)
-  ansible.builtin.command: chattr +i /etc/resolv.conf
-  ignore_errors: true
+- name: Aplicar IP imediatamente (adiciona o novo SEM remover os antigos)
+  ansible.builtin.shell: |
+    ip addr replace {{ server.ip }}/{{ server.mask }} dev {{ server.iface }}
+    ip link set {{ server.iface }} up
+    ip route replace default via {{ server.gateway }} dev {{ server.iface }}
   changed_when: false
+
+- name: Remover IPs antigos da interface (somente após o novo estar ativo)
+  ansible.builtin.shell: |
+    for cidr in $(ip -4 -o addr show dev {{ server.iface }} | awk '{print $4}'); do
+        [ "${cidr%%/*}" = "{{ server.ip }}" ] && continue
+        ip addr del "$cidr" dev {{ server.iface }} || true
+    done
+  changed_when: false
+  ignore_errors: true

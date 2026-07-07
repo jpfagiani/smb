@@ -1,6 +1,5 @@
 ---
-  - name: reload networking
-    ansible.builtin.service:
-      name: networking
-      state: restarted
-    ignore_errors: true
+# Sem handlers de propósito: a rede é aplicada com "ip addr replace" nas
+# tasks do role, NUNCA com "systemctl restart networking" — o restart
+# derruba a sessão SSH e, se algo falhar no meio, deixa a máquina sem rede.
+[]

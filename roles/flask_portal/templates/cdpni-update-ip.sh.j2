@@ -11,9 +11,6 @@ HOSTNAME="{{ server.hostname }}"
 DOMAIN="{{ server.domain }}"
 IP_CACHE="$PORTAL_DIR/.last_ip"
 
-# Desbloqueia resolv.conf para evitar interferência durante detecção de rede
-chattr -i /etc/resolv.conf 2>/dev/null || true
-
 # Detecta IP atual da interface
 CURRENT_IP=$(ip -4 addr show "$IFACE" 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
 
@@ -61,7 +58,8 @@ if systemctl is-active --quiet nginx; then
     nginx -t 2>/dev/null && systemctl reload nginx && echo "  nginx recarregado"
 fi
 
-# Bloqueia resolv.conf contra sobrescrita por dhclient, resolvconf, etc.
-chattr +i /etc/resolv.conf 2>/dev/null && echo "  resolv.conf bloqueado (chattr +i)"
+# Garante que o resolv.conf não ficou imutável (versões antigas usavam chattr +i,
+# o que sabotava qualquer recuperação manual da rede)
+chattr -i /etc/resolv.conf 2>/dev/null || true
 
 echo "cdpni-update-ip: concluido (IP=$CURRENT_IP)"
