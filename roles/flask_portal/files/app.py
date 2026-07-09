@@ -2020,7 +2020,7 @@ def raid_smart():
         session=session, banner=get_banner(), active='raid', is_admin=True)
 
 # ── backups ────────────────────────────────────────────────────────────────────
-BACKUPS_T = BASE_T.replace("__BODY__", """
+BACKUPS_T = BASE_T.replace("__BODY__", r"""
 <div class="page-title">🗄️ Backups</div>
 {% if backup_running %}
 <div class="card" style="margin-bottom:1rem;border:2px solid var(--accent)">
@@ -2086,7 +2086,7 @@ BACKUPS_T = BASE_T.replace("__BODY__", """
         <div class="form-group" style="margin-top:.25rem">
           <label>Pasta de destino no compartilhamento</label>
           <div style="display:flex;gap:.5rem;align-items:center">
-            <input type="text" id="smbSub" name="smb_sub" placeholder="Backups\\Servidor (opcional)"
+            <input type="text" id="smbSub" name="smb_sub" placeholder="Backups\Servidor (opcional)"
                    style="flex:1;font-family:var(--mono);font-size:.82rem">
             <button type="button" class="btn" onclick="smbBrowse('')" style="white-space:nowrap">
               📂 Navegar
