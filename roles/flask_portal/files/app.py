@@ -2566,10 +2566,12 @@ def lixeira_safe(rel: str) -> Path:
 def get_lixeira(limite: int = 500) -> list[dict]:
     """Itens excluídos (vfs recycle) — recycle/<usuario>/<share>/<caminho>.
 
-    Arquivos dentro de pastas agrupam SEMPRE pela pasta de primeiro nível
-    (mesma visão do share Recycle no Windows) — mesmo que a pasta ainda
-    exista no share, para o conteúdo não aparecer solto após restaurações
-    parciais. Arquivos excluídos da raiz do share ficam como linha própria.
+    Arquivos dentro de pastas agrupam pela UNIDADE EXCLUÍDA: o ancestral
+    mais alto que não existe mais no share (ex.: JEAN/DOCUMENTOS/ quando
+    só a subpasta DOCUMENTOS foi excluída). Se todos os ancestrais ainda
+    existem (restauração parcial ou exclusão de arquivos de pasta viva),
+    agrupa pela pasta-mãe completa — nada fica solto. Arquivos excluídos
+    da raiz do share ficam como linha própria.
     """
     itens: dict = {}
     try:
@@ -2589,9 +2591,16 @@ def get_lixeira(limite: int = 500) -> list[dict]:
             chave, tipo = rel, 'arquivo'
             exibe = '/'.join(comps[2:]) if share else '/'.join(comps[1:])
             if share and len(comps) > 3:
-                chave = '/'.join(comps[:3])
+                idx = None
+                for i in range(2, len(comps) - 1):
+                    if not os.path.isdir(os.path.join(SAMBA_ROOT, comps[1], *comps[2:i + 1])):
+                        idx = i
+                        break
+                if idx is None:
+                    idx = len(comps) - 2  # tudo existe: agrupa pela pasta-mãe
+                chave = '/'.join(comps[:idx + 1])
                 tipo = 'pasta'
-                exibe = comps[2] + '/'
+                exibe = '/'.join(comps[2:idx + 1]) + '/'
             it = itens.get(chave)
             if it is None:
                 itens[chave] = it = {
