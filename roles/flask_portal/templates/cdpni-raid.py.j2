@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+# CDPNI — operações de RAID para o portal web (executado via sudo)
+# Uso: cdpni-raid <candidatos | saude | add-spare DEV | expandir DEV | concluir-growfs>
+#
+# Segurança:
+#   - só aceita dispositivos que passam na validação E estão na lista de
+#     candidatos (nunca o disco do sistema, nunca membros do array,
+#     nunca discos com partições montadas)
+#   - "expandir" NÃO roda o xfs_growfs na hora: marca uma flag e o
+#     raid_check.sh (cron horário) conclui quando o reshape terminar
+import json
+import os
+import re
+import subprocess
+import sys
+
+MOUNT = '{{ raid.mount }}'
+FLAG = '/var/lib/cdpni/raid_growfs_pendente'
+DEV_RE = re.compile(r'^/dev/(sd[a-z]+|vd[a-z]+|nvme\d+n\d+)$')
+
+
+def sh(cmd):
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def array_device() -> str:
+    r = sh(['findmnt', '-n', '-o', 'SOURCE', MOUNT])
+    dev = r.stdout.strip()
+    if dev.startswith('/dev/md'):
+        return dev
+    try:
+        with open('/proc/mdstat') as f:
+            for line in f:
+                m = re.match(r'^(md\d+)\s*:', line)
+                if m:
+                    return '/dev/' + m.group(1)
+    except OSError:
+        pass
+    return ''
+
+
+def base_disk(part: str) -> str:
+    part = part.strip()
+    if 'nvme' in part:
+        return re.sub(r'p\d+$', '', part)
+    return re.sub(r'\d+$', '', part)
+
+
+def mdstat_members() -> set:
+    devs = set()
+    try:
+        with open('/proc/mdstat') as f:
+            for line in f:
+                for m in re.findall(r'(\w+)\[\d+\]', line):
+                    devs.add('/dev/' + m)
+    except OSError:
+        pass
+    return devs
+
+
+def mounted_disks() -> set:
+    devs = set()
+    try:
+        with open('/proc/mounts') as f:
+            for line in f:
+                src = line.split()[0]
+                if src.startswith('/dev/'):
+                    devs.add(base_disk(src))
+    except OSError:
+        pass
+    return devs
+
+
+def swap_disks() -> set:
+    devs = set()
+    try:
+        with open('/proc/swaps') as f:
+            for line in list(f)[1:]:
+                src = line.split()[0]
+                if src.startswith('/dev/'):
+                    devs.add(base_disk(src))
+    except OSError:
+        pass
+    return devs
+
+
+def candidatos() -> list:
+    protegidos = mounted_disks() | swap_disks() | {base_disk(m) for m in mdstat_members()}
+    lista = []
+    r = sh(['lsblk', '-dn', '-o', 'NAME,TYPE,SIZE,MODEL'])
+    for line in r.stdout.splitlines():
+        partes = line.split(None, 3)
+        if len(partes) < 3 or partes[1] != 'disk':
+            continue
+        dev = '/dev/' + partes[0]
+        if not DEV_RE.match(dev) or dev in protegidos:
+            continue
+        tem_particao = len(sh(['lsblk', '-n', '-o', 'NAME', dev]).stdout.splitlines()) > 1
+        tem_assinatura = sh(['blkid', dev]).returncode == 0
+        lista.append({
+            'dev': dev,
+            'tamanho': partes[2],
+            'modelo': partes[3].strip() if len(partes) > 3 else '—',
+            'tem_dados': tem_particao or tem_assinatura,
+        })
+    return lista
+
+
+def smart_disco(dev: str) -> dict:
+    info = {'smart': 'indisponivel', 'temp': None, 'horas': None,
+            'realocados': None, 'pendentes': None}
+    r = sh(['smartctl', '-H', '-A', '-d', 'sat', '-T', 'permissive', dev])
+    saida = r.stdout + r.stderr
+    m = re.search(r'overall-health self-assessment test result:\s*(\w+)', saida)
+    if not m:
+        return info
+    info['smart'] = 'ok' if m.group(1) == 'PASSED' else 'falha'
+    atributos = {}
+    for linha in saida.splitlines():
+        am = re.match(r'^\s*(\d+)\s+(\S+)\s+.*\s(\d+)\s*(?:\(.*\))?\s*$', linha)
+        if am:
+            atributos[int(am.group(1))] = int(am.group(3))
+    info['realocados'] = atributos.get(5)
+    info['pendentes'] = atributos.get(197)
+    info['horas'] = atributos.get(9)
+    if 194 in atributos:
+        info['temp'] = atributos[194]
+    if info['smart'] == 'ok':
+        for chave in ('realocados', 'pendentes'):
+            if (info[chave] or 0) > 0:
+                info['smart'] = 'atencao'
+        if (atributos.get(198) or 0) > 0:
+            info['smart'] = 'atencao'
+    return info
+
+
+def detalhe_array(md: str) -> str:
+    return sh(['mdadm', '--detail', md]).stdout
+
+
+def saude() -> dict:
+    md = array_device()
+    resultado = {'array': None, 'discos': [], 'growfs_pendente': os.path.exists(FLAG)}
+    if not md:
+        return resultado
+    det = detalhe_array(md)
+
+    def campo(nome, padrao=''):
+        m = re.search(rf'^\s*{nome}\s*:\s*(.+)$', det, re.M)
+        return m.group(1).strip() if m else padrao
+
+    estado = campo('State')
+    acao = ''
+    progresso = ''
+    for nome in ('Reshape Status', 'Rebuild Status', 'Resync Status', 'Check Status'):
+        v = campo(nome)
+        if v:
+            acao = nome.split()[0].lower()
+            pm = re.search(r'(\d+)%', v)
+            progresso = pm.group(1) if pm else ''
+            break
+    termino = ''
+    try:
+        with open('/proc/mdstat') as f:
+            tm = re.search(r'finish=([\d.]+)min', f.read())
+            if tm:
+                termino = f'~{float(tm.group(1)):.0f} min restantes'
+    except OSError:
+        pass
+
+    resultado['array'] = {
+        'device': md,
+        'level': campo('Raid Level'),
+        'estado': estado,
+        'saudavel': ('degraded' not in estado.lower()
+                     and 'FAILED' not in estado
+                     and campo('Failed Devices', '0') == '0'),
+        'ativos': campo('Active Devices', '0'),
+        'total': campo('Raid Devices', '0'),
+        'falhos': campo('Failed Devices', '0'),
+        'spares': campo('Spare Devices', '0'),
+        'tamanho': campo('Array Size').split('(')[-1].rstrip(')') if campo('Array Size') else '',
+        'acao': acao,
+        'progresso': progresso,
+        'termino': termino,
+    }
+
+    for m in re.finditer(r'^\s*\S+\s+\d+\s+\d+\s+\S+\s+(.+?)\s+(/dev/\S+)\s*$', det, re.M):
+        papel, dev = m.group(1).strip(), m.group(2)
+        info = {'dev': dev, 'papel': papel}
+        info.update(smart_disco(dev))
+        resultado['discos'].append(info)
+    return resultado
+
+
+def validar_candidato(dev: str) -> None:
+    if not DEV_RE.match(dev):
+        print(f'Dispositivo inválido: {dev}', file=sys.stderr)
+        sys.exit(1)
+    if dev not in [c['dev'] for c in candidatos()]:
+        print(f'{dev} não é um disco elegível (em uso, do sistema ou já no RAID).',
+              file=sys.stderr)
+        sys.exit(1)
+
+
+def limpar_disco(dev: str) -> None:
+    sh(['mdadm', '--zero-superblock', '--force', dev])
+    sh(['wipefs', '-af', dev])
+
+
+def add_spare(dev: str) -> None:
+    validar_candidato(dev)
+    md = array_device()
+    if not md:
+        print('Nenhum array RAID encontrado.', file=sys.stderr)
+        sys.exit(1)
+    limpar_disco(dev)
+    r = sh(['mdadm', '--manage', md, '--add', dev])
+    if r.returncode != 0:
+        print(r.stderr.strip() or 'mdadm --add falhou', file=sys.stderr)
+        sys.exit(1)
+    print(f'{dev} adicionado como hot spare de {md}. '
+          f'Ele assume automaticamente se um disco falhar.')
+
+
+def expandir(dev: str) -> None:
+    validar_candidato(dev)
+    md = array_device()
+    if not md:
+        print('Nenhum array RAID encontrado.', file=sys.stderr)
+        sys.exit(1)
+    det = detalhe_array(md)
+    if 'Reshape Status' in det:
+        print('Já existe um reshape em andamento — aguarde terminar.', file=sys.stderr)
+        sys.exit(1)
+    m = re.search(r'^\s*Raid Devices\s*:\s*(\d+)', det, re.M)
+    if not m:
+        print('Não foi possível ler o número de discos do array.', file=sys.stderr)
+        sys.exit(1)
+    n_novo = int(m.group(1)) + 1
+    limpar_disco(dev)
+    r = sh(['mdadm', '--manage', md, '--add', dev])
+    if r.returncode != 0:
+        print(r.stderr.strip() or 'mdadm --add falhou', file=sys.stderr)
+        sys.exit(1)
+    r = sh(['mdadm', '--grow', md, f'--raid-devices={n_novo}'])
+    if r.returncode != 0:
+        print(r.stderr.strip() or 'mdadm --grow falhou', file=sys.stderr)
+        sys.exit(1)
+    os.makedirs(os.path.dirname(FLAG), exist_ok=True)
+    with open(FLAG, 'w') as f:
+        f.write(dev + '\n')
+    print(f'Expansão iniciada: {md} agora com {n_novo} discos. '
+          f'O reshape leva horas (acompanhe nesta página); o filesystem será '
+          f'expandido automaticamente ao terminar. '
+          f'Depois, inclua {dev} em raid.devices no group_vars/all.yml.')
+
+
+def concluir_growfs() -> None:
+    if not os.path.exists(FLAG):
+        return
+    md = array_device()
+    if not md:
+        return
+    det = detalhe_array(md)
+    reshape_ativo = 'Reshape Status' in det
+    try:
+        with open('/proc/mdstat') as f:
+            reshape_ativo = reshape_ativo or 'reshape' in f.read()
+    except OSError:
+        pass
+    if reshape_ativo:
+        print('Reshape ainda em andamento — growfs adiado.')
+        return
+    r = sh(['xfs_growfs', MOUNT])
+    if r.returncode != 0:
+        print(r.stderr.strip() or 'xfs_growfs falhou', file=sys.stderr)
+        return
+    scan = sh(['mdadm', '--detail', '--scan']).stdout
+    with open('/etc/mdadm/mdadm.conf', 'w') as f:
+        f.write(scan)
+        f.write('MAILADDR root\n')
+    sh(['update-initramfs', '-u'])
+    os.remove(FLAG)
+    print(f'Expansão concluída: filesystem de {MOUNT} ampliado e mdadm.conf atualizado.')
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(__doc__ or 'Uso: cdpni-raid <candidatos|saude|add-spare DEV|expandir DEV|concluir-growfs>',
+              file=sys.stderr)
+        sys.exit(1)
+    cmd = sys.argv[1]
+    if cmd == 'candidatos':
+        print(json.dumps(candidatos(), ensure_ascii=False))
+    elif cmd == 'saude':
+        print(json.dumps(saude(), ensure_ascii=False))
+    elif cmd == 'add-spare' and len(sys.argv) == 3:
+        add_spare(sys.argv[2])
+    elif cmd == 'expandir' and len(sys.argv) == 3:
+        expandir(sys.argv[2])
+    elif cmd == 'concluir-growfs':
+        concluir_growfs()
+    else:
+        print(f'Comando desconhecido: {cmd}', file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

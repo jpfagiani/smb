@@ -330,6 +330,14 @@
     owner: root
     group: root
 
+- name: Instalar wrapper de operações RAID (saúde, hot spare, expansão)
+  ansible.builtin.template:
+    src: cdpni-raid.py.j2
+    dest: /usr/local/bin/cdpni-raid
+    owner: root
+    group: root
+    mode: "0700"
+
 - name: Criar wrapper SMART (evita auditoria do sudo)
   ansible.builtin.copy:
     dest: /usr/local/bin/cdpni-smart
@@ -350,7 +358,7 @@
     dest: /etc/sudoers.d/cdpni-portal
     content: |
       Defaults:{{ portal.user }} !log_allowed, !syslog, !requiretty
-      {{ portal.user }} ALL=(root) NOPASSWD: /usr/local/bin/cdpni-setpass, /usr/local/bin/cdpni-setgroup, /usr/local/bin/cdpni-useradd, /usr/local/bin/cdpni-userdel, /usr/local/bin/cdpni-groupadd, /usr/local/bin/cdpni-groupdel, /usr/local/bin/cdpni-smart, /usr/bin/smbpasswd, /usr/sbin/useradd, /usr/sbin/userdel, /usr/sbin/usermod, /usr/sbin/groupadd, /usr/sbin/groupdel, /usr/bin/gpasswd, /usr/bin/tee, /bin/tee, /usr/bin/systemctl, /usr/bin/smbstatus, /usr/bin/smbcontrol, /usr/bin/testparm, /usr/bin/smartctl, /bin/mkdir, /bin/chmod, /bin/chown, /bin/tar, /usr/bin/tar, /usr/bin/tail, /usr/bin/setfacl, /usr/bin/getfacl, /bin/mv, /usr/bin/mv, /bin/rm, /usr/bin/rm, /bin/bash
+      {{ portal.user }} ALL=(root) NOPASSWD: /usr/local/bin/cdpni-setpass, /usr/local/bin/cdpni-setgroup, /usr/local/bin/cdpni-useradd, /usr/local/bin/cdpni-userdel, /usr/local/bin/cdpni-groupadd, /usr/local/bin/cdpni-groupdel, /usr/local/bin/cdpni-smart, /usr/local/bin/cdpni-raid, /usr/bin/smbpasswd, /usr/sbin/useradd, /usr/sbin/userdel, /usr/sbin/usermod, /usr/sbin/groupadd, /usr/sbin/groupdel, /usr/bin/gpasswd, /usr/bin/tee, /bin/tee, /usr/bin/systemctl, /usr/bin/smbstatus, /usr/bin/smbcontrol, /usr/bin/testparm, /usr/bin/smartctl, /bin/mkdir, /bin/chmod, /bin/chown, /bin/tar, /usr/bin/tar, /usr/bin/tail, /usr/bin/setfacl, /usr/bin/getfacl, /bin/mv, /usr/bin/mv, /bin/rm, /usr/bin/rm, /bin/bash
     validate: visudo -cf %s
     mode: "0440"
 

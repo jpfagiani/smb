@@ -170,6 +170,10 @@
       fi
       echo "=== $(date) ===" >> /var/log/raid_check.log
       mdadm --detail "$RAID" >> /var/log/raid_check.log 2>&1
+      # Conclui expansão pendente (xfs_growfs) quando o reshape termina —
+      # a flag é criada pelo portal via /usr/local/bin/cdpni-raid expandir
+      [ -x /usr/local/bin/cdpni-raid ] && \
+          /usr/local/bin/cdpni-raid concluir-growfs >> /var/log/raid_check.log 2>&1 || true
 
 - name: Agendar monitoramento RAID (cron horário)
   ansible.builtin.cron:

@@ -286,6 +286,26 @@ def get_disk_usage() -> list[dict]:
         pass
     return disks
 
+def get_raid_saude() -> dict:
+    """Saúde do array e SMART dos membros via wrapper privilegiado."""
+    try:
+        rc, out, _ = run(['sudo', '/usr/local/bin/cdpni-raid', 'saude'])
+        if rc == 0 and out:
+            return json.loads(out)
+    except Exception:
+        pass
+    return {}
+
+def get_raid_candidatos() -> list:
+    """Discos novos elegíveis para entrar no RAID (nunca o do sistema)."""
+    try:
+        rc, out, _ = run(['sudo', '/usr/local/bin/cdpni-raid', 'candidatos'])
+        if rc == 0 and out:
+            return json.loads(out)
+    except Exception:
+        pass
+    return []
+
 def get_memory() -> dict:
     info = {'total': 0, 'used': 0, 'avail': 0, 'pct': 0, 'total_h': '—', 'used_h': '—'}
     try:
@@ -1741,6 +1761,100 @@ def shares_testparm():
 # ── raid / discos ──────────────────────────────────────────────────────────────
 RAID_T = BASE_T.replace("__BODY__", """
 <div class="page-title">💾 RAID / Discos</div>
+
+{% if saude and saude.array %}
+<div class="card">
+  <div class="card-header"><h3>❤️ Saúde do RAID — {{ saude.array.device }}</h3></div>
+  <div class="card-body">
+    <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.6rem">
+      {% if saude.array.acao %}
+        <span class="badge badge-warn">{{ 'Expandindo' if saude.array.acao == 'reshape' else 'Reconstruindo' }} {{ saude.array.progresso }}%</span>
+      {% elif saude.array.saudavel %}
+        <span class="badge badge-ok">Saudável</span>
+      {% else %}
+        <span class="badge badge-err">DEGRADADO</span>
+      {% endif %}
+      <span class="badge badge-info">{{ saude.array.level }}</span>
+      <span class="text-muted" style="font-size:.78rem">{{ saude.array.ativos }}/{{ saude.array.total }} discos ativos</span>
+      {% if saude.array.spares != '0' %}<span class="badge badge-info">{{ saude.array.spares }} spare</span>{% endif %}
+      {% if saude.array.falhos != '0' %}<span class="badge badge-err">{{ saude.array.falhos }} com falha</span>{% endif %}
+      {% if saude.array.tamanho %}<span class="text-muted" style="font-size:.78rem">· {{ saude.array.tamanho }}</span>{% endif %}
+    </div>
+    {% if saude.array.acao %}
+    <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem">
+      <div class="progress" style="flex:1"><div class="progress-bar warn" style="width:{{ saude.array.progresso or 0 }}%"></div></div>
+      <span class="text-muted" style="font-size:.76rem">{{ saude.array.termino }}</span>
+    </div>
+    {% endif %}
+    {% if saude.growfs_pendente and not saude.array.acao %}
+    <p class="text-muted" style="font-size:.78rem">⏳ Expansão do filesystem pendente — será concluída na próxima verificação automática (a cada hora).</p>
+    {% elif saude.growfs_pendente %}
+    <p class="text-muted" style="font-size:.78rem">⏳ Ao fim do reshape, o filesystem será expandido automaticamente.</p>
+    {% endif %}
+    <table>
+      <thead><tr><th>Disco</th><th>Papel no array</th><th>SMART</th><th>Temp</th><th>Horas ligado</th><th>Setores realocados</th><th>Pendentes</th></tr></thead>
+      <tbody>
+      {% for d in saude.discos %}
+      <tr>
+        <td style="font-family:var(--mono);font-size:.78rem">{{ d.dev }}</td>
+        <td style="font-size:.78rem">{{ d.papel }}</td>
+        <td>
+          {% if d.smart == 'ok' %}<span class="badge badge-ok">OK</span>
+          {% elif d.smart == 'atencao' %}<span class="badge badge-warn">Atenção</span>
+          {% elif d.smart == 'falha' %}<span class="badge badge-err">FALHA</span>
+          {% else %}<span class="badge badge-info">—</span>{% endif %}
+        </td>
+        <td style="font-size:.78rem">{{ d.temp ~ '°C' if d.temp is not none else '—' }}</td>
+        <td style="font-size:.78rem">{{ d.horas if d.horas is not none else '—' }}</td>
+        <td style="font-size:.78rem">{{ d.realocados if d.realocados is not none else '—' }}</td>
+        <td style="font-size:.78rem">{{ d.pendentes if d.pendentes is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if candidatos %}
+<div class="card">
+  <div class="card-header"><h3>🆕 Discos novos detectados</h3></div>
+  <div class="card-body">
+    <p class="text-muted" style="font-size:.78rem;margin-bottom:.6rem">
+      Discos fora do RAID e sem uso pelo sistema. <strong>Todo o conteúdo do disco
+      escolhido será apagado</strong> ao adicioná-lo.
+    </p>
+    <table>
+      <thead><tr><th>Disco</th><th>Tamanho</th><th>Modelo</th><th>Conteúdo</th><th class="text-right">Ações</th></tr></thead>
+      <tbody>
+      {% for c in candidatos %}
+      <tr>
+        <td style="font-family:var(--mono);font-size:.78rem">{{ c.dev }}</td>
+        <td>{{ c.tamanho }}</td>
+        <td style="font-size:.78rem">{{ c.modelo }}</td>
+        <td>{% if c.tem_dados %}<span class="badge badge-warn">Tem dados</span>{% else %}<span class="badge badge-ok">Vazio</span>{% endif %}</td>
+        <td class="text-right" style="white-space:nowrap">
+          <form method="post" action="{{ url_for('raid_adicionar') }}" style="display:inline"
+                onsubmit="return confirm('Adicionar {{ c.dev }} como HOT SPARE?\\n\\nO disco fica de reserva e assume automaticamente se um disco do RAID falhar.\\nTODOS os dados de {{ c.dev }} serão apagados.')">
+            <input type="hidden" name="disk" value="{{ c.dev }}">
+            <input type="hidden" name="modo" value="spare">
+            <button type="submit" class="btn btn-xs">🛟 Hot spare</button>
+          </form>
+          <form method="post" action="{{ url_for('raid_adicionar') }}" style="display:inline"
+                onsubmit="return confirm('EXPANDIR o RAID com {{ c.dev }}?\\n\\nO array será redistribuído (reshape) — leva HORAS e não deve ser interrompido por queda de energia.\\nO espaço extra aparece automaticamente ao final.\\nTODOS os dados de {{ c.dev }} serão apagados.')">
+            <input type="hidden" name="disk" value="{{ c.dev }}">
+            <input type="hidden" name="modo" value="expandir">
+            <button type="submit" class="btn btn-xs">📈 Expandir capacidade</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 <div class="card">
   <div class="card-header"><h3>Arrays RAID — /proc/mdstat</h3></div>
   <div class="card-body">
@@ -1806,7 +1920,21 @@ RAID_T = BASE_T.replace("__BODY__", """
 def raid_page():
     return render_template_string(RAID_T,
         raid=get_mdstat(), disks=get_disk_usage(), smart_output='', smart_disk='',
+        saude=get_raid_saude(), candidatos=get_raid_candidatos(),
         session=session, banner=get_banner(), active='raid', is_admin=True)
+
+@app.route('/admin/raid/adicionar', methods=['POST'])
+@admin_required
+def raid_adicionar():
+    disk = request.form.get('disk', '').strip()
+    modo = request.form.get('modo', '')
+    if not re.match(r'^/dev/(sd[a-z]+|vd[a-z]+|nvme\d+n\d+)$', disk) or modo not in ('spare', 'expandir'):
+        flash('Requisição inválida', 'error')
+        return redirect(url_for('raid_page'))
+    cmd = 'add-spare' if modo == 'spare' else 'expandir'
+    rc, out, err = run(['sudo', '/usr/local/bin/cdpni-raid', cmd, disk])
+    flash(out or err or 'Sem resposta do comando', 'success' if rc == 0 else 'error')
+    return redirect(url_for('raid_page'))
 
 @app.route('/admin/raid/smart', methods=['POST'])
 @admin_required
@@ -1849,6 +1977,7 @@ def raid_smart():
     return render_template_string(RAID_T,
         raid=get_mdstat(), disks=get_disk_usage(),
         smart_output=smart_output, smart_disk=smart_disk,
+        saude=get_raid_saude(), candidatos=get_raid_candidatos(),
         session=session, banner=get_banner(), active='raid', is_admin=True)
 
 # ── backups ────────────────────────────────────────────────────────────────────

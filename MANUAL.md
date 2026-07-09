@@ -209,7 +209,27 @@ Gerencia os compartilhamentos diretamente no `smb.conf`.
 
 ### 3.6 RAID / Discos
 
-Monitora arrays RAID e discos físicos.
+Monitora arrays RAID e discos físicos, e gerencia discos novos.
+
+**Saúde do RAID** (topo da página):
+- Estado do array: Saudável / DEGRADADO / Reconstruindo / Expandindo (com progresso e tempo restante)
+- Tabela dos discos-membros com S.M.A.R.T. resumido: **OK**, **Atenção**
+  (setores realocados/pendentes — planeje a troca) ou **FALHA** (troque já),
+  temperatura, horas ligado
+
+**Discos novos detectados**: ao plugar um disco, ele aparece aqui
+(nunca o disco do sistema nem discos em uso). Duas ações:
+
+- **🛟 Hot spare** — o disco fica de reserva e assume **automaticamente**
+  se um disco do RAID falhar. Rápido e recomendado.
+- **📈 Expandir capacidade** — adiciona o disco ao array (RAID 5 de N para
+  N+1 discos). O reshape leva **horas** e não deve ser interrompido por
+  queda de energia; o filesystem é expandido **automaticamente** ao final
+  (verificação de hora em hora pelo cron). Depois, inclua o disco em
+  `raid.devices` no `group_vars/all.yml`.
+
+Em ambas as ações **todo o conteúdo do disco novo é apagado**. Discos do
+sistema e discos com partições montadas nunca são oferecidos.
 
 - **Arrays RAID** — lidos de `/proc/mdstat`; badge verde = saudável, vermelho = degradado
 - **Discos/Partições** — lista todas as partições com uso em percentual e barra visual
