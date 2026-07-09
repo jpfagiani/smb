@@ -1,516 +1,218 @@
-# Manual do Servidor de Arquivos Samba — CDPNI
+# Manual do Servidor de Arquivos — CDPNI
 
-## Visão Geral
-
-Servidor de arquivos Windows (SMB/CIFS) instalado via Ansible em Debian 12/13.  
-Inclui: RAID de dados, Samba 4, portal web de administração (Flask + Nginx + TLS).
-
-- **IP padrão:** 192.168.2.11 (configurável no inventory)
-- **Portal web:** `https://192.168.2.11:8443`
-- **Compartilhamentos Windows:** `\\192.168.2.11\NomeDoShare`
-- **Compartilhamentos Linux:** `smb://192.168.2.11/NomeDoShare`
+> **Público-alvo:** qualquer pessoa que precise instalar o servidor ou usá-lo no dia a dia.
+> Para detalhes técnicos, comandos avançados e explicações linha a linha, consulte o [MANUAL_TECNICO.md](MANUAL_TECNICO.md).
 
 ---
 
-## 1. Instalação do Zero
+## 1. O que é este servidor
 
-### Pré-requisitos na máquina destino
+Um servidor de arquivos completo para a rede local da unidade, com:
 
-- Debian 12 ou 13 (instalação mínima, sem desktop)
-- Pelo menos 2 discos adicionais além do disco do SO (para o RAID)
-- Acesso SSH com senha root ou chave pública
-- IP estático configurado
-
-### Pré-requisitos na máquina de controle (onde você roda o Ansible)
-
-```
-apt install ansible python3-pip
-```
-
-### Passo 1 — Clonar o repositório
-
-```bash
-git clone <url_do_repo> smb
-cd smb
-```
-
-### Passo 2 — Configurar o inventory
-
-Edite `inventory/hosts.ini`:
-
-```ini
-[samba_server]
-192.168.2.11 ansible_user=root ansible_ssh_pass=SUA_SENHA
-```
-
-Se usar chave SSH:
-```ini
-[samba_server]
-192.168.2.11 ansible_user=root ansible_ssh_private_key_file=~/.ssh/id_rsa
-```
-
-### Passo 3 — Configurar as variáveis
-
-O `bootstrap.sh` gera o `group_vars/all.yml` automaticamente com as respostas
-interativas — este passo manual só é necessário se você **não** usar o bootstrap.
-
-O arquivo real fica **fora do git** (contém IP e senhas do ambiente; um
-`git pull` nunca o sobrescreve). Crie a partir do exemplo versionado:
-
-```bash
-cp group_vars/all.yml.example group_vars/all.yml
-```
-
-Edite `group_vars/all.yml` com os valores do ambiente:
-
-```yaml
-server:
-  ip:          "192.168.2.11"
-  domain:      "cdpni.local"
-  admin_user:  "admin"
-
-raid:
-  devices:     ["/dev/sdb", "/dev/sdc"]   # discos para o RAID (NÃO o disco do SO)
-  level:       1                           # RAID-1 (espelho); use 5 para 3+ discos
-  mount:       "/mnt/raid"
-
-samba:
-  workgroup:   "CDPNI"
-  shares:
-    - name:      "compartilhado"
-      comment:   "Pasta compartilhada geral"
-      group:     "sambashare"
-    - name:      "restrito"
-      comment:   "Somente administração"
-      group:     "admins"
-
-portal:
-  user:        "cdpni-portal"
-  dir:         "/opt/cdpni-portal"
-  port:        8443
-
-backup:
-  dir:         "/opt/backups"
-  script:      "/opt/scripts/backup.sh"   # opcional; crie seu script aqui
-```
-
-### Passo 4 — Executar o playbook
-
-```bash
-ansible-playbook -i inventory/hosts.ini site.yml
-```
-
-O playbook executa em ordem:
-1. **common** — pacotes base, locale, timezone, NTP
-2. **network** — hostname, /etc/hosts
-3. **storage** — cria RAID, formata, monta em /mnt/raid, adiciona ao /etc/fstab
-4. **samba** — instala smbd/nmbd, configura smb.conf, cria usuário admin
-5. **flask_portal** — instala Python venv, gunicorn, nginx, TLS autoassinado, serviço systemd
-6. **security** — nftables (firewall), fail2ban
+| Componente | O que faz |
+|---|---|
+| **Samba** | Compartilhamentos de rede acessíveis pelo Windows (`\\IP-do-servidor`) |
+| **RAID** | Os dados ficam gravados em vários discos ao mesmo tempo — se um disco queimar, nada se perde |
+| **Portal Web** | Administração completa pelo navegador: `https://IP-do-servidor:8443` |
+| **Lixeira** | Todo arquivo excluído dos compartilhamentos pode ser restaurado |
+| **Backup** | Cópia dos dados para pasta local ou para outra máquina Windows da rede |
+| **Firewall** | Só a rede interna acessa o servidor; proteção contra tentativas de senha |
+| **Logs de acesso** | Registro de quem abriu, renomeou ou excluiu cada arquivo |
 
 ---
 
-## 2. Acesso ao Portal Web
+## 2. Instalação do zero
 
-Abra no navegador:
-```
-https://192.168.2.11:8443
-```
+### 2.1 O que você precisa
 
-> O certificado TLS é autoassinado — o navegador pedirá confirmação de exceção de segurança. Isso é normal. Clique em "Avançado → Continuar".
+- Máquina com **2 ou mais discos além do disco do sistema** (para o RAID);
+- **Debian 13** instalado no disco do sistema (instalação padrão, sem interface gráfica);
+- Acesso à internet durante a instalação (para baixar os pacotes);
+- Os IPs da sua rede em mãos: IP fixo para o servidor, gateway, DNS e NTP.
 
-**Usuário padrão de administrador:** o valor de `server.admin_user` (padrão: `admin`).  
-A senha inicial é definida pelo Ansible — veja `group_vars/all.yml` ou redefina pelo próprio portal.
+> ⚠️ **Os discos escolhidos para o RAID serão totalmente apagados.**
+> Confira duas vezes qual é o disco do sistema antes de confirmar.
 
----
-
-## 3. Funções do Portal
-
-### 3.1 Compartilhamentos (Arquivos)
-
-Acesso via menu lateral → **Compartilhamentos**.
-
-- Lista todos os shares Samba que o usuário tem permissão de acessar
-- Administradores veem todos os shares
-- Permite navegar, fazer upload, criar pastas, renomear e excluir arquivos
-
-### 3.2 Dashboard
-
-Acesso restrito a administradores. Mostra:
-
-| Indicador | Fonte |
-|-----------|-------|
-| CPU % | /proc (via `top -bn1`) |
-| RAM % | /proc/meminfo |
-| Uptime | /proc/uptime |
-| Sessões Samba ativas | `smbstatus --brief` |
-| Uso de disco | `df -h` |
-| Status de serviços | `systemctl is-active` |
-
-### 3.3 Usuários
-
-Cria, lista e remove usuários Linux + Samba em um único passo.
-
-**Criar usuário:**
-1. Clique em **➕ Novo Usuário**
-2. Preencha usuário, senha e confirme
-3. Selecione "Adicionar ao Samba: Sim" para permitir acesso via Windows
-4. Clique em **Criar**
-
-> O portal executa internamente: `useradd -m -s /bin/bash USER` + `chpasswd` + `smbpasswd -a -s USER`
-
-**Redefinir senha:**
-- Clique em **🔑 Senha** ao lado do usuário
-- Preencha a nova senha e confirme
-- Selecione se deve atualizar o Samba também
-
-**Excluir usuário:**
-- Clique em **🗑** ao lado do usuário
-- Remove do sistema Linux e do Samba (`userdel -r` + `smbpasswd -x`)
-- **Não é possível excluir o próprio usuário logado**
-
-### 3.4 Grupos
-
-Gerencia grupos Linux (usados pelo Samba para controle de acesso).
-
-**Criar grupo:**
-1. Clique em **➕ Novo Grupo**
-2. Informe o nome (letras minúsculas, números, _ e -)
-
-**Editar membros:**
-- Clique em **✏ Editar** ao lado do grupo
-- Liste os membros separados por vírgula: `user1,user2,user3`
-- Clique em **Salvar**
-
-> Para dar acesso a um share a um grupo, adicione `@nomedogrupo` em "Usuários/grupos válidos" na configuração do share.
-
-### 3.5 Shares Samba
-
-Gerencia os compartilhamentos diretamente no `smb.conf`.
-
-**Criar share:**
-1. Clique em **➕ Novo Share**
-2. Preencha: nome, caminho, usuários/grupos válidos
-3. Selecione somente leitura se necessário
-4. Se marcar "Criar diretório", o portal cria o diretório automaticamente
-5. O Samba é recarregado automaticamente após salvar
-
-**Editar share:**
-- Clique em **✏ Editar** para alterar qualquer configuração
-
-**Excluir share:**
-- Clique em **🗑** — remove apenas do smb.conf, não apaga os arquivos no disco
-
-**testparm:**
-- Clique em **🔍 testparm** para validar o smb.conf atual
-
-**Reload Samba:**
-- Clique em **🔄 Reload Samba** para forçar recarregamento sem reiniciar
-
-### 3.6 RAID / Discos
-
-Monitora arrays RAID e discos físicos, e gerencia discos novos.
-
-**Saúde do RAID** (topo da página):
-- Estado do array: Saudável / DEGRADADO / Reconstruindo / Expandindo (com progresso e tempo restante)
-- Tabela dos discos-membros com S.M.A.R.T. resumido: **OK**, **Atenção**
-  (setores realocados/pendentes — planeje a troca) ou **FALHA** (troque já),
-  temperatura, horas ligado
-
-**Discos novos detectados**: ao plugar um disco, ele aparece aqui
-(nunca o disco do sistema nem discos em uso). Duas ações:
-
-- **🛟 Hot spare** — o disco fica de reserva e assume **automaticamente**
-  se um disco do RAID falhar. Rápido e recomendado.
-- **📈 Expandir capacidade** — adiciona o disco ao array (RAID 5 de N para
-  N+1 discos). O reshape leva **horas** e não deve ser interrompido por
-  queda de energia; o filesystem é expandido **automaticamente** ao final
-  (verificação de hora em hora pelo cron). Depois, inclua o disco em
-  `raid.devices` no `group_vars/all.yml`.
-
-Em ambas as ações **todo o conteúdo do disco novo é apagado**. Discos do
-sistema e discos com partições montadas nunca são oferecidos.
-
-- **Arrays RAID** — lidos de `/proc/mdstat`; badge verde = saudável, vermelho = degradado
-- **Discos/Partições** — lista todas as partições com uso em percentual e barra visual
-- **SMART** — clique em **🔬** ao lado de qualquer disco para ver dados SMART do `smartctl`
-
-> Se o array aparecer como **DEGRADADO**, substitua o disco com falha com urgência.
-
-### 3.7 Backups
-
-Lista arquivos `.tar.gz` no diretório de backup (`/opt/backups` por padrão).
-
-**Executar backup manual:**
-- Clique em **▶ Executar Backup Agora**
-- Se existir `/opt/scripts/backup.sh`, ele é chamado via `sudo bash`
-- Se não existir, o portal faz um `tar -czf` dos shares automaticamente
-
-**Baixar backup:**
-- Clique em **⬇** ao lado do arquivo
-
-**Excluir backup:**
-- Clique em **🗑** ao lado do arquivo
-
-**Agendar backups automáticos:**
-Crie `/opt/scripts/backup.sh` e adicione ao cron do root:
-```bash
-# /etc/cron.d/cdpni-backup
-0 2 * * * root /opt/scripts/backup.sh >> /var/log/cdpni_backup.log 2>&1
-```
-
-### 3.8 Logs de Acesso
-
-Exibe os últimos registros dos logs do Samba:
-- `/var/log/samba/log.smbd`
-- `/var/log/samba/log.nmbd`
-- `/var/log/samba/audit.log` (se auditoria estiver habilitada)
-
-Selecione 50, 200 ou 500 linhas conforme necessário.
-
-### 3.9 Configurações do Portal
-
-- **Aviso/Notícia** — texto exibido na tela inicial para todos os usuários
-- **Banner** — imagem JPG/PNG exibida no topo do portal (máx. 160px altura)
-
----
-
-## 4. Gerenciamento via Linha de Comando
-
-### Acessar o servidor
+### 2.2 Passo a passo
 
 ```bash
-ssh admin@192.168.2.11
+# 1. Entre como root
+su -
+
+# 2. Instale o git e clone o repositório
+apt install -y git
+git clone https://github.com/jpfagiani/smb /opt/smb
+cd /opt/smb
+
+# 3. Execute o instalador
+bash bootstrap.sh
 ```
 
-### Verificar status do Samba
+O instalador é interativo. O que cada pergunta significa:
+
+| Pergunta | O que responder |
+|---|---|
+| **Interface de rede** | A placa de rede conectada à rede local (o instalador lista todas, mesmo sem IP) |
+| **IP fixo do servidor** | O endereço que o servidor terá para sempre (ex.: `10.14.29.9`) |
+| **Máscara CIDR** | Quase sempre `24` (rede /24 = 254 endereços) |
+| **Gateway** | O roteador da rede — precisa estar na mesma faixa do IP (o instalador valida) |
+| **DNS** | Servidor de nomes (Enter = usa o gateway) |
+| **Servidor NTP** | Fonte de hora da intranet — padrão `10.14.8.20` (GPU). Hora errada quebra o apt e bagunça os logs |
+| **Nome do servidor** | Ex.: `smb` — vira o endereço `smb.dominio` |
+| **Domínio local** | Ex.: `cdpni.local` |
+| **Sigla da unidade** | Ex.: `CDPNI`, `PLAVII` — aparece no portal e no certificado |
+| **Nome por extenso** | Ex.: `Centro de Detenção Provisória de Nova Independência` |
+| **Login do administrador** | Usuário com acesso total (padrão `sambadmin`) |
+| **Senha padrão dos usuários Samba** | Senha inicial de todos os usuários (cada um troca depois no portal) |
+| **Senha do painel web** | Reservada ao painel legado — anote mesmo assim |
+| **Discos para o RAID** | Os números dos discos de dados (⚠️ nunca o disco do sistema — o instalador o marca com `[SO]`) |
+| **Nível de RAID** | `1` = espelho (2 discos) · `5` = paridade (3+, tolera 1 falha) · `6` = tolera 2 falhas (4+) · `10` = espelho+velocidade (4+ pares) |
+
+Ao confirmar, a instalação roda sozinha (10–20 min). O RAID continua sincronizando em segundo plano por algumas horas depois — o servidor já funciona normalmente nesse período.
+
+### 2.3 Conferência pós-instalação
 
 ```bash
-sudo systemctl status smbd nmbd
-sudo smbstatus
-```
+# Todos devem aparecer "active (running)":
+systemctl status smbd nmbd nginx cdpni-portal nftables fail2ban --no-pager
 
-### Reiniciar serviços
-
-```bash
-sudo systemctl restart smbd nmbd
-sudo systemctl restart cdpni-portal
-sudo systemctl restart nginx
-```
-
-### Ver logs em tempo real
-
-```bash
-sudo journalctl -fu smbd
-sudo journalctl -fu cdpni-portal
-sudo tail -f /var/log/samba/log.smbd
-```
-
-### Verificar RAID
-
-```bash
-cat /proc/mdstat
-sudo mdadm --detail /dev/md0
-```
-
-### Verificar disco com falha
-
-```bash
-sudo smartctl -a /dev/sdb
-sudo mdadm --detail /dev/md0 | grep -E "State|Failed"
-```
-
-### Substituir disco com falha no RAID-1
-
-```bash
-# 1. Marcar disco com falha (se não automático)
-sudo mdadm /dev/md0 --fail /dev/sdb
-# 2. Remover disco
-sudo mdadm /dev/md0 --remove /dev/sdb
-# 3. Substituir fisicamente o disco, inicializar a partição
-sudo parted /dev/sdb mklabel gpt
-sudo parted /dev/sdb mkpart primary 0% 100%
-# 4. Adicionar novo disco ao array
-sudo mdadm /dev/md0 --add /dev/sdb1
-# 5. Acompanhar reconstrução
-watch cat /proc/mdstat
-```
-
----
-
-## 5. Verificação Pós-instalação
-
-Após executar o playbook, verifique:
-
-```bash
-# No servidor
-systemctl is-active smbd nmbd cdpni-portal nginx
+# RAID montado e sincronizando:
 cat /proc/mdstat
 df -h /mnt/raid
 ```
 
-```bash
-# No Windows (clientes)
-net use * \\192.168.2.11\compartilhado /user:admin
-```
+No navegador de qualquer máquina da rede: `https://IP-do-servidor:8443` → tela de login do portal.
+No Windows: `Win+R` → `\\IP-do-servidor` → lista dos compartilhamentos.
 
-```bash
-# No Linux (clientes)
-smbclient //192.168.2.11/compartilhado -U admin
-```
-
-Portal web:
-```
-https://192.168.2.11:8443  → deve abrir a tela de login
-```
+> O navegador avisa "conexão não segura" porque o certificado é autoassinado.
+> Para remover o aviso, baixe `https://IP-do-servidor:8443/cdpni-ca.crt` e instale
+> como "Autoridade de Certificação Raiz Confiável" nas máquinas.
 
 ---
 
-## 6. Solução de Problemas
+## 3. O Portal — dia a dia
 
-### Portal não abre (Connection refused ou Timeout)
+Acesse `https://IP-do-servidor:8443` e entre com **usuário e senha do Samba** (os mesmos dos compartilhamentos). Administradores veem todos os menus; usuários comuns veem apenas seus arquivos.
 
-```bash
-sudo systemctl status cdpni-portal nginx
-sudo journalctl -u cdpni-portal --no-pager -n 50
-```
+### 3.1 Compartilhamentos (arquivos)
 
-### Erro "Worker failed to boot" no portal
+Navegue pelas pastas dos shares direto no navegador: baixar, enviar, renomear, criar pasta e excluir — útil quando não se está numa máquina com o share mapeado.
 
-```bash
-source /opt/cdpni-portal/venv/bin/activate
-python -c "import pam; import flask; import six; print('OK')"
-# Se falhar, reinstalar dependências:
-pip install flask==3.1.0 python-pam==2.0.2 gunicorn==23.0.0 werkzeug==3.1.3 six
-```
+### 3.2 Lixeira 🗑️ (administradores)
 
-### Usuário não consegue acessar o share pelo Windows
+Tudo que é excluído de qualquer compartilhamento vem parar aqui. A navegação é igual ao Explorer do Windows:
 
-```bash
-# Verificar se o usuário tem senha Samba
-sudo pdbedit -L | grep USUARIO
-# Resetar senha Samba
-echo -e "NOVASENHA\nNOVASENHA" | sudo smbpasswd -s USUARIO
-```
+- A tela inicial mostra **o que foi excluído** (pastas e arquivos), por quem, de qual share, quando e o tamanho;
+- **Clique numa pasta para entrar nela** e continue navegando (o caminho no topo é clicável para voltar);
+- **↩️ Restaurar** devolve o item ao local exato de onde foi excluído — funciona para uma pasta inteira ou para um único arquivo. Se a pasta já existir no share, o conteúdo é mesclado;
+- **⬇️** baixa o arquivo; **✖** exclui definitivamente;
+- **Esvaziar itens > 30 dias** limpa exclusões antigas para liberar espaço.
 
-### Permissão negada ao criar arquivos no share
+Também dá para acessar pelo Windows: digite `\\IP-do-servidor\Recycle` na barra do Explorer (só administradores; para restaurar, recorte e cole de volta no share).
 
-```bash
-# Verificar permissões do diretório
-ls -la /mnt/raid/shares/
-# Corrigir
-sudo chmod 0775 /mnt/raid/shares/NOME_DO_SHARE
-sudo chown root:sambashare /mnt/raid/shares/NOME_DO_SHARE
-```
+### 3.3 Usuários e Grupos (administradores)
 
-### RAID degradado
+- **Criar usuário**: define login e senha — a pessoa já consegue acessar os shares dos grupos dela;
+- **Permissões**: marque de quais compartilhamentos o usuário participa;
+- **Trocar senha / desativar**: pelos botões da lista;
+- Cada usuário pode trocar a própria senha no botão **Senha** (canto superior direito).
 
-```bash
-cat /proc/mdstat
-sudo mdadm --detail /dev/md0
-# Ver qual disco falhou e substituir conforme seção 4
-```
+### 3.4 Compartilhamentos Samba (administradores)
+
+Criar novos shares, definir se são restritos (por grupo) ou públicos, e editar as permissões dos existentes.
+
+### 3.5 RAID / Discos (administradores)
+
+- **Saúde**: estado do RAID (Saudável/Degradado/Reconstruindo) e S.M.A.R.T. resumido de cada disco (OK/Atenção/FALHA, temperatura, horas de uso);
+- **Disco novo**: ao plugar um disco vazio, ele aparece em "Discos novos detectados" com duas opções:
+  - **🛟 Hot spare** — fica de reserva; se um disco do RAID falhar, assume **automaticamente**;
+  - **📈 Expandir capacidade** — junta-se ao RAID e aumenta o espaço útil (a redistribuição leva horas; o espaço aparece sozinho ao terminar);
+- **🔬** roda o teste S.M.A.R.T. completo de um disco.
+
+> Se o RAID aparecer **DEGRADADO**, um disco falhou: o sistema continua funcionando,
+> mas troque o disco o quanto antes (veja o manual técnico, seção RAID).
+
+### 3.6 Backups (administradores)
+
+Dois destinos:
+
+- **Local (no servidor)** — grava um `.tar.gz` numa pasta do próprio servidor;
+- **Rede Windows (SMB)** — grava direto numa pasta compartilhada de outra máquina:
+  1. Na máquina de destino (Windows): botão direito na pasta → **Propriedades → Compartilhamento → Compartilhamento Avançado** → marque "Compartilhar esta pasta" → em **Permissões**, dê "Alteração" ao seu usuário;
+  2. No portal: informe o **IP** da máquina, o **nome do compartilhamento**, usuário e senha do Windows;
+  3. **📂 Navegar** lista as pastas do destino para escolher onde gravar;
+  4. **Executar Backup** — o destino é testado antes de iniciar; qualquer problema aparece na hora, em português.
+
+Marque o que incluir: arquivos dos shares, configuração do Samba, usuários e portal. O card **"Última execução"** mostra o resultado do último backup.
+
+> **RAID não é backup.** O RAID protege contra defeito de disco; o backup protege
+> contra exclusão acidental, ransomware e desastres. Faça backup em outra máquina.
+
+### 3.7 Logs de acesso (administradores)
+
+A tabela **"Acessos a arquivos"** mostra quem **Abriu / Renomeou / Excluiu / Criou pasta** em cada share, com data, IP e o arquivo.
+
+- Badge amarelo **"(falhou)"** = a tentativa retornou erro — nem sempre é acesso negado: o Windows faz sondagens normais que falham (arquivos de miniatura, travas do Office). Falha seguida de sucesso no mesmo segundo é acesso normal;
+- **Falhas repetidas** de um usuário num share onde ele não deveria entrar, isso sim merece atenção.
 
 ---
 
-## 6.1 Trocar o IP do Servidor
+## 4. Tarefas comuns
 
-Use **sempre** o script dedicado — nunca edite `/etc/network/interfaces` na mão:
+### Trocar o IP do servidor
 
 ```bash
-sudo bash change-ip.sh 10.14.29.8
-# ou interativo:
+cd /opt/smb
 sudo bash change-ip.sh
 ```
 
-Garantias do script:
+O script pergunta o novo IP/gateway/DNS, valida tudo **antes** de aplicar e, se você estiver via SSH, roda em segundo plano para sobreviver à queda da conexão. Depois, atualize o DNS no gateway (`gwos dns update smb <novo-ip>`).
 
-1. Lê e grava o `group_vars/all.yml` com YAML de verdade (python3) — se algum valor não puder ser lido, **aborta sem alterar nada**
-2. Valida que o gateway pertence à sub-rede nova (gateway errado = servidor sem rota no boot)
-3. Se a rede nova não estiver nas redes permitidas do firewall, adiciona automaticamente a `network_ranges`
-4. Em sessão SSH, roda o playbook via `systemd-run` — **desacoplado da sessão**: se o SSH cair na troca, a aplicação continua até o fim (`tail -f /var/log/cdpni_change_ip.log` para acompanhar)
-5. O role de rede valida o novo `interfaces` com `ifquery` antes de gravar, aplica com `ip addr replace` (novo IP antes de remover o antigo) e **nunca** reinicia o serviço networking
-
-**Redes suportadas:** a padrão é `10.14.29.0/24` (privada RFC 1918). As faixas `172.14.29.0/24` e `192.14.29.0/24` também já estão liberadas no firewall (`network_ranges` no `group_vars/all.yml`) — atenção: são endereços **públicos** reutilizados internamente; funciona atrás do gateway GWOS, mas sites reais da internet nessas faixas ficam inacessíveis a partir da rede local.
-
-Depois da troca, atualize o DNS no gateway: `gwos dns update cdpni <novo-ip>`.
-
----
-
-## 7. Segurança
-
-### Firewall (nftables)
-
-Acesso permitido apenas das redes internas definidas em `network_ranges`
-(`group_vars/all.yml`): faixas RFC 1918 + `172.14.29.0/24` + `192.14.29.0/24`.
-
-Portas abertas por padrão:
-- **22** — SSH (altere para outra porta em produção)
-- **445** — SMB (Samba)
-- **139** — NetBIOS (Samba legado)
-- **8443** — Portal web HTTPS
-
-### fail2ban
-
-Protege contra tentativas de força bruta:
-- SSH: bloqueio após 5 tentativas em 10 min
-- Portal web: bloqueio após 5 tentativas em 10 min
+### Atualizar o sistema (novas versões deste repositório)
 
 ```bash
-# Ver IPs banidos
-sudo fail2ban-client status sshd
-sudo fail2ban-client status cdpni-portal
-
-# Desbanir um IP
-sudo fail2ban-client set sshd unbanip 192.168.1.100
+cd /opt/smb
+git pull
+ansible-playbook -i inventory/hosts.ini site.yml --diff
 ```
 
-### TLS do Portal
+É seguro re-executar quantas vezes quiser: o playbook **nunca** apaga o RAID em uso nem reseta senhas já alteradas.
 
-O certificado autoassinado é gerado pelo Ansible. Para usar um certificado válido (Let's Encrypt ou CA própria), substitua em:
-- `/etc/ssl/cdpni/portal.crt`
-- `/etc/ssl/cdpni/portal.key`
+### Adicionar um disco novo ao RAID
 
-E recarregue o Nginx:
+Plugue o disco → portal → **RAID / Discos** → "Discos novos detectados" → escolha Hot spare ou Expandir. Depois de expandir, atualize a lista de discos do arquivo de configuração:
+
 ```bash
-sudo systemctl reload nginx
+sudo bash /opt/smb/scripts/raid_ids.sh   # gera o bloco devices: atualizado
+nano /opt/smb/group_vars/all.yml         # cole no lugar do bloco antigo
+cp /opt/smb/group_vars/all.yml /root/all.yml.bak
+```
+
+### Guardar a configuração
+
+O arquivo `/opt/smb/group_vars/all.yml` contém toda a configuração do servidor (IPs, senhas, discos) e **fica fora do git**. Depois de qualquer mudança:
+
+```bash
+cp /opt/smb/group_vars/all.yml /root/all.yml.bak
 ```
 
 ---
 
-## 8. Atualizar o Portal Após Mudanças no Repositório
+## 5. Problemas comuns
 
-No servidor:
-```bash
-cd /opt/cdpni-portal
-sudo -u cdpni-portal git pull    # se instalado via git
-# ou copie o novo app.py e reinicie:
-sudo systemctl restart cdpni-portal
-```
-
-Via Ansible (recomendado):
-```bash
-ansible-playbook -i inventory/hosts.ini site.yml --tags flask_portal
-```
+| Sintoma | Causa provável | Solução |
+|---|---|---|
+| Portal não abre (502) | Serviço do portal parado | `systemctl restart cdpni-portal` |
+| Portal não abre (timeout) | nginx parado ou firewall | `systemctl restart nginx` · confira se a máquina está numa rede permitida |
+| Usuário não acessa o share | Sem senha Samba ou senha errada | Portal → Usuários → Trocar senha |
+| "Conta bloqueada" ao errar senha no portal | fail2ban baniu o IP (5 erros/5 min) | Espere 30 min ou `fail2ban-client set cdpni-portal unbanip <IP>` |
+| `apt update` reclama de assinatura "Not live until" | Relógio atrasado | `chronyc makestep` e confira o NTP (`chronyc sources`) |
+| RAID degradado | Disco falhou | Manual técnico, seção "Substituir disco" |
+| Backup SMB falha na hora | Compartilhamento/senha errados | A mensagem do portal diz exatamente o quê; confira o compartilhamento no Windows |
+| Arquivo sumiu | Alguém excluiu | Portal → Lixeira → Restaurar |
 
 ---
 
-## 9. Estrutura do Repositório
+## 6. Instalando em outra unidade (ex.: PLAVII)
 
-```
-smb/
-├── ansible.cfg
-├── inventory/
-│   └── hosts.ini          ← endereços dos servidores
-├── group_vars/
-│   └── all.yml            ← variáveis globais (IP, discos, shares...)
-├── site.yml               ← playbook principal
-├── roles/
-│   ├── common/            ← pacotes base, locale, NTP
-│   ├── network/           ← hostname, /etc/hosts
-│   ├── storage/           ← RAID, formatação, montagem
-│   ├── samba/             ← smb.conf, usuários Samba
-│   ├── flask_portal/      ← portal web (app.py, nginx, systemd)
-│   └── security/          ← nftables, fail2ban
-└── MANUAL.md              ← este arquivo
-```
+O sistema é genérico: rode o `bootstrap.sh` na máquina nova e responda com os dados da unidade (IP, hostname, domínio, sigla e nome por extenso). Tudo — portal, certificado, rede — se adapta às respostas. Nada precisa ser editado no código.
