@@ -18,6 +18,8 @@ server:
   mask:       "24"
   gateway:    "10.14.29.1"
   dns:        "10.14.29.1"
+  # NTP institucional da intranet (GPU); se removido, usa o gateway
+  ntp:        "10.14.8.20"
   hostname:   "cdpni"
   domain:     "cdpni.local"
   admin_user: "sambadmin"

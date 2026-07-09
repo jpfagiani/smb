@@ -239,6 +239,14 @@ done
 ask "DNS (Enter = gateway) [${GATEWAY}]:"
 read -rp "  > " _IN; DNS="${_IN:-$GATEWAY}"
 
+# NTP — na intranet a fonte de hora é o servidor institucional (GPU)
+while true; do
+    ask "Servidor NTP [10.14.8.20]:"
+    read -rp "  > " _IN; NTP="${_IN:-10.14.8.20}"
+    valid_ip "$NTP" && break
+    warn "IP inválido"
+done
+
 # Hostname
 while true; do
     ask "Nome do servidor [cdpni]:"
@@ -415,6 +423,7 @@ server:
   mask:       "${SAMBA_MASK}"
   gateway:    "${GATEWAY}"
   dns:        "${DNS}"
+  ntp:        "${NTP}"
   hostname:   "${HOSTNAME}"
   domain:     "${DOMAIN}"
   admin_user: "${ADMIN_USER}"

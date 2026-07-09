@@ -1,12 +1,14 @@
 # Gerenciado pelo Ansible — CDPNI
-# Fonte preferida: o gateway (GWOS serve NTP para a LAN). Enquanto ele
-# não existir/estiver fora, o pool ntp.br mantém o relógio certo — sem
-# fonte nenhuma o clock deriva e o apt passa a rejeitar assinaturas
-# ("Not live until ...").
-server {{ server.gateway }} iburst prefer minpoll 4 maxpoll 6
+# Fonte principal: servidor NTP institucional da intranet (server.ntp);
+# se não definido, usa o gateway. O pool ntp.br fica como reserva (se a
+# rede tiver saída) — sem fonte nenhuma o relógio deriva e o apt passa
+# a rejeitar assinaturas ("Not live until ...").
+server {{ server.ntp | default(server.gateway) }} iburst prefer minpoll 4 maxpoll 6
+{% if server.ntp is defined and server.ntp != server.gateway %}
+server {{ server.gateway }} iburst minpoll 4 maxpoll 6
+{% endif %}
 pool pool.ntp.br iburst
 driftfile /var/lib/chrony/drift
-# Corrige diferenças grandes por salto (não só ajuste gradual),
-# em qualquer momento — não apenas nas 3 primeiras medições
+# Corrige diferenças grandes por salto, em qualquer momento
 makestep 1.0 -1
 rtcsync
