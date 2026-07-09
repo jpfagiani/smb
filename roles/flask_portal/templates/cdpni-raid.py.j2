@@ -95,6 +95,14 @@ def candidatos() -> list:
         dev = '/dev/' + partes[0]
         if not DEV_RE.match(dev) or dev in protegidos:
             continue
+        # Ignora dispositivos sem mídia (leitor de cartão vazio, mídia
+        # virtual de BMC etc.): aparecem como disco mas com 0 bytes
+        try:
+            bytes_disco = int(sh(['lsblk', '-bdn', '-o', 'SIZE', dev]).stdout.strip() or 0)
+        except ValueError:
+            bytes_disco = 0
+        if bytes_disco == 0:
+            continue
         tem_particao = len(sh(['lsblk', '-n', '-o', 'NAME', dev]).stdout.splitlines()) > 1
         tem_assinatura = sh(['blkid', dev]).returncode == 0
         lista.append({
