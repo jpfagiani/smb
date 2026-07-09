@@ -1,8 +1,12 @@
 ---
+# Sem internet o refresh do cache falha, mas isso não pode abortar um
+# re-run com os pacotes já instalados; se faltarem pacotes E não houver
+# internet, a task de instalação seguinte falha com o erro verdadeiro.
 - name: Atualizar cache apt
   ansible.builtin.apt:
     update_cache: true
     cache_valid_time: 3600
+  ignore_errors: true
 
 - name: Instalar pacotes base
   ansible.builtin.apt:
