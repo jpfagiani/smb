@@ -90,6 +90,7 @@
     owner: "{{ portal.user }}"
     group: "{{ portal.user }}"
     mode: "0640"
+  notify: restart portal
 
 - name: Copiar app.py
   ansible.builtin.copy:
@@ -98,6 +99,7 @@
     owner: "{{ portal.user }}"
     group: "{{ portal.user }}"
     mode: "0640"
+  notify: restart portal
 
 - name: Criar permissions.json se não existir
   ansible.builtin.copy:
