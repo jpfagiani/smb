@@ -136,7 +136,9 @@
   ignore_errors: true
 
 # As lixeiras pessoais são 0700 de cada usuário — a ACL dá ao portal
-# leitura para a página Lixeira (com default ACL para itens futuros)
+# leitura para a página Lixeira (com default ACL para itens futuros).
+# O setfacl -m também recalcula a máscara, reativando a ACL em pastas
+# antigas criadas 0700 pelo vfs recycle (que zerava a máscara).
 - name: Configurar ACL para o portal ler a lixeira
   ansible.builtin.shell: |
     setfacl -R  -m u:{{ portal.user }}:rx {{ raid.mount }}/recycle

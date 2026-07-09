@@ -58,6 +58,10 @@
     vfs objects          = recycle full_audit
     recycle:repository   = {{ raid.mount }}/recycle/%U/%S
     recycle:keeptree     = yes
+    # 0770 (não o padrão 0700): com bits de grupo a máscara de ACL não
+    # anula o acesso de leitura do portal (página Lixeira)
+    recycle:directory_mode = 0770
+    recycle:subdir_mode  = 0770
     recycle:versions     = yes
     recycle:touch        = yes
     recycle:maxsize      = 1073741824
