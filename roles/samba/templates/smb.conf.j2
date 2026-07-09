@@ -62,10 +62,12 @@
     recycle:maxsize      = 1073741824
     recycle:exclude      = *.tmp *.temp ~$* .DS_Store Thumbs.db desktop.ini
 
-    # Auditoria de acesso
+    # Auditoria de acesso — vai para o syslog local5, que o rsyslog grava
+    # em /var/log/samba/audit.log (lido pela página Logs do portal).
+    # Samba >= 4.15 usa syscalls *at: open/rename/unlink viraram openat etc.
     full_audit:prefix    = %u|%I|%S
-    full_audit:success   = open read write
-    full_audit:failure   = connect
+    full_audit:success   = connect disconnect openat renameat unlinkat mkdirat
+    full_audit:failure   = connect openat
     full_audit:facility  = local5
     full_audit:priority  = notice
 

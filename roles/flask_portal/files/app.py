@@ -408,6 +408,41 @@ def get_samba_logs(lines: int = 100) -> str:
         pass
     return '\n\n'.join(result) if result else '(sem logs disponíveis)'
 
+def get_audit_log(lines: int = 200) -> list[dict]:
+    """Eventos de acesso a arquivos (full_audit → rsyslog local5 → audit.log)."""
+    arquivo = '/var/log/samba/audit.log'
+    rc, out, _ = run(['sudo', 'tail', f'-n{lines}', arquivo])
+    if rc != 0 or not out:
+        return []
+    ops = {'openat': 'Abriu', 'renameat': 'Renomeou', 'unlinkat': 'Excluiu',
+           'mkdirat': 'Criou pasta', 'connect': 'Conectou', 'disconnect': 'Desconectou'}
+    eventos = []
+    for linha in reversed(out.splitlines()):
+        if 'smbd_audit:' not in linha:
+            continue
+        pre, _, resto = linha.partition('smbd_audit:')
+        partes = [p.strip() for p in resto.strip().split('|')]
+        if len(partes) < 5:
+            continue
+        pre_campos = pre.split()
+        if pre_campos and 'T' in pre_campos[0]:
+            ts = pre_campos[0][:19].replace('T', ' ')
+        else:
+            ts = ' '.join(pre_campos[:3])
+        op = partes[3]
+        if op == 'renameat' and len(partes) > 6:
+            alvo = ' → '.join(partes[5:])
+        elif len(partes) > 5:
+            alvo = partes[-1]
+        else:
+            alvo = ''
+        eventos.append({
+            'hora': ts, 'usuario': partes[0], 'ip': partes[1],
+            'share': partes[2], 'op': ops.get(op, op),
+            'ok': partes[4] == 'ok', 'alvo': alvo,
+        })
+    return eventos
+
 def backup_running():
     """Retorna (is_running, info_dict) para o backup em andamento."""
     try:
@@ -2003,6 +2038,12 @@ BACKUPS_T = BASE_T.replace("__BODY__", """
   </div>
 </div>
 {% endif %}
+{% if backup_log and not backup_running %}
+<div class="card" style="margin-bottom:1rem">
+  <div class="card-header"><h3>📜 Última execução de backup em rede (log)</h3></div>
+  <pre class="log-box" style="max-height:170px">{{ backup_log }}</pre>
+</div>
+{% endif %}
 <div class="card" style="margin-bottom:1rem">
   <div class="card-header"><h3>Novo Backup</h3></div>
   <div class="card-body">
@@ -2281,9 +2322,12 @@ function confirmDelBackup(n) {
 @admin_required
 def backups_page():
     running, bk_info = backup_running()
+    backup_log = ''
+    if os.path.exists('/var/log/cdpni_backup.log'):
+        _, backup_log, _ = run(['sudo', 'tail', '-n15', '/var/log/cdpni_backup.log'])
     return render_template_string(BACKUPS_T,
         backups=get_backups(), backup_dir=BACKUP_DIR, samba_root=SAMBA_ROOT,
-        backup_running=running, bk_info=bk_info,
+        backup_running=running, bk_info=bk_info, backup_log=backup_log,
         session=session, banner=get_banner(), active='backups', is_admin=True)
 
 @app.route('/admin/backups/browse', methods=['POST'])
@@ -2387,16 +2431,23 @@ def backup_run():
             dest_dir = os.path.join(mnt, sub_path) if sub_path else mnt
             out_file = os.path.join(dest_dir, filename)
             tar_srcs = ' '.join(shlex.quote(t) for t in targets)
+            # Sem vers= fixo: o kernel negocia a maior versão SMB que o
+            # destino suportar (vers=3.0 fixo falhava em Windows antigos)
             smb_opts = shlex.quote(
-                f'username={smb_user},password={smb_pass},uid=0,gid=0,vers=3.0'
+                f'username={smb_user},password={smb_pass},uid=0,gid=0'
             )
+            log = '/var/log/cdpni_backup.log'
             script = (
+                f'exec >>{shlex.quote(log)} 2>&1; '
+                f'echo "=== $(date "+%d/%m/%Y %H:%M:%S") backup SMB para //{smb_host}/{smb_share} ==="; '
                 f'mkdir -p {shlex.quote(mnt)} && '
                 f'mount -t cifs //{smb_host}/{smb_share} {shlex.quote(mnt)} -o {smb_opts} && '
                 f'mkdir -p {shlex.quote(dest_dir)} && '
-                f'{tar} -czf {shlex.quote(out_file)} {tar_srcs} ; '
-                f'umount {shlex.quote(mnt)} ; '
-                f'rmdir {shlex.quote(mnt)}'
+                f'{tar} -czf {shlex.quote(out_file)} {tar_srcs} && '
+                f'echo "OK: backup concluído ({filename})" '
+                f'|| echo "ERRO: backup falhou — veja as mensagens acima"; '
+                f'umount {shlex.quote(mnt)} 2>/dev/null; '
+                f'rmdir {shlex.quote(mnt)} 2>/dev/null; true'
             )
             proc = subprocess.Popen(
                 ['sudo', 'bash', '-c', script],
@@ -2457,7 +2508,35 @@ LOGS_T = BASE_T.replace("__BODY__", """
   <a href="?lines=500" class="btn {{ 'btn-primary' if lines==500 else '' }}">500 linhas</a>
 </div>
 <div class="card">
-  <div class="card-header"><h3>Logs recentes</h3></div>
+  <div class="card-header"><h3>👣 Acessos a arquivos</h3></div>
+  {% if eventos %}
+  <table>
+    <thead><tr><th>Data/Hora</th><th>Usuário</th><th>IP</th><th>Share</th><th>Ação</th><th>Arquivo / Alvo</th></tr></thead>
+    <tbody>
+    {% for e in eventos %}
+    <tr>
+      <td style="font-family:var(--mono);font-size:.74rem;white-space:nowrap">{{ e.hora }}</td>
+      <td style="font-size:.78rem">{{ e.usuario }}</td>
+      <td style="font-family:var(--mono);font-size:.74rem">{{ e.ip }}</td>
+      <td style="font-size:.78rem">{{ e.share }}</td>
+      <td><span class="badge {{ 'badge-ok' if e.ok else 'badge-err' }}">{{ e.op }}{{ '' if e.ok else ' (negado)' }}</span></td>
+      <td style="font-family:var(--mono);font-size:.74rem;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ e.alvo }}">{{ e.alvo }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="card-body">
+    <p class="text-muted" style="font-size:.82rem">
+      Nenhum evento de acesso registrado ainda. A auditoria grava em
+      /var/log/samba/audit.log a partir das próximas conexões — se o
+      arquivo não existir, reaplique o playbook (tags samba,common).
+    </p>
+  </div>
+  {% endif %}
+</div>
+<div class="card">
+  <div class="card-header"><h3>Logs do serviço (smbd/nmbd)</h3></div>
   <pre class="log-box">{{ logs }}</pre>
 </div>
 """)
@@ -2467,6 +2546,7 @@ LOGS_T = BASE_T.replace("__BODY__", """
 def logs_page():
     lines = min(int(request.args.get('lines', 100)), 1000)
     return render_template_string(LOGS_T, logs=get_samba_logs(lines), lines=lines,
+        eventos=get_audit_log(lines),
         session=session, banner=get_banner(), active='logs', is_admin=True)
 
 # ── change-pass própria senha ──────────────────────────────────────────────────

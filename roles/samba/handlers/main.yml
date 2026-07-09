@@ -4,3 +4,8 @@
       name: "{{ item }}"
       state: restarted
     loop: [smbd, nmbd]
+
+  - name: restart rsyslog
+    ansible.builtin.service:
+      name: rsyslog
+      state: restarted

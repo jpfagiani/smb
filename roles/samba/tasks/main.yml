@@ -4,8 +4,26 @@
 
 - name: Instalar Samba
   ansible.builtin.apt:
-    name: [samba, samba-common-bin, smbclient]
+    name: [samba, samba-common-bin, smbclient, rsyslog]
     state: present
+
+# A auditoria full_audit envia para o syslog (facility local5) — sem esta
+# regra do rsyslog nada vira arquivo e a página Logs do portal fica só
+# com o log do daemon
+- name: Direcionar auditoria do Samba para /var/log/samba/audit.log
+  ansible.builtin.copy:
+    dest: /etc/rsyslog.d/49-samba-audit.conf
+    content: |
+      local5.*  -/var/log/samba/audit.log
+      & stop
+    mode: "0644"
+  notify: restart rsyslog
+
+- name: Habilitar e iniciar rsyslog
+  ansible.builtin.service:
+    name: rsyslog
+    state: started
+    enabled: true
 
 # ── Grupos ────────────────────────────────────────────────────────────────────
 
