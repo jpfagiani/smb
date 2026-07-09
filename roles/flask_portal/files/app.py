@@ -2519,12 +2519,20 @@ LOGS_T = BASE_T.replace("__BODY__", """
       <td style="font-size:.78rem">{{ e.usuario }}</td>
       <td style="font-family:var(--mono);font-size:.74rem">{{ e.ip }}</td>
       <td style="font-size:.78rem">{{ e.share }}</td>
-      <td><span class="badge {{ 'badge-ok' if e.ok else 'badge-err' }}">{{ e.op }}{{ '' if e.ok else ' (negado)' }}</span></td>
+      <td><span class="badge {{ 'badge-ok' if e.ok else 'badge-warn' }}">{{ e.op }}{{ '' if e.ok else ' (falhou)' }}</span></td>
       <td style="font-family:var(--mono);font-size:.74rem;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ e.alvo }}">{{ e.alvo }}</td>
     </tr>
     {% endfor %}
     </tbody>
   </table>
+  <div style="padding:.5rem .9rem;border-top:1px solid var(--border)">
+    <p class="text-muted" style="font-size:.74rem;margin:0">
+      "Falhou" = a tentativa de abertura retornou erro, o que nem sempre é
+      permissão negada: o Windows faz sondagens normais que falham (streams
+      :Zone.Identifier, arquivos de lock ~$, Thumbs.db). Falha seguida de
+      sucesso no mesmo segundo para o mesmo arquivo é acesso normal.
+    </p>
+  </div>
   {% else %}
   <div class="card-body">
     <p class="text-muted" style="font-size:.82rem">
