@@ -2600,16 +2600,24 @@ def get_lixeira(limite: int = 500) -> list[dict]:
                     'rel': chave, 'tipo': tipo, 'usuario': comps[0],
                     'share': share or '—', 'arquivo': exibe,
                     'bytes': 0, 'n': 0, 'mtime': 0.0,
-                    'restauravel': bool(share),
+                    'restauravel': bool(share), 'filhos': [],
                 }
             it['bytes'] += st.st_size
             it['n'] += 1
             # ctime = quando entrou na lixeira (mtime preserva a data original)
             it['mtime'] = max(it['mtime'], st.st_ctime)
+            if tipo == 'pasta' and len(it['filhos']) < 200:
+                it['filhos'].append({
+                    'rel': rel,
+                    'nome': '/'.join(comps[len(chave.split('/')):]),
+                    'tam': fmt_size(st.st_size),
+                    'quando': datetime.fromtimestamp(st.st_ctime).strftime('%d/%m/%Y %H:%M'),
+                })
     lista = list(itens.values())
     for it in lista:
         it['tam'] = fmt_size(it['bytes'])
         it['quando'] = datetime.fromtimestamp(it['mtime']).strftime('%d/%m/%Y %H:%M')
+        it['filhos'].sort(key=lambda f: f['nome'])
     lista.sort(key=lambda i: i['mtime'], reverse=True)
     return lista[:limite]
 
@@ -2628,12 +2636,17 @@ LIXEIRA_T = BASE_T.replace("__BODY__", """
     <thead><tr><th>Excluído em</th><th>Por</th><th>Share</th><th>Arquivo</th><th>Tamanho</th><th class="text-right">Ações</th></tr></thead>
     <tbody>
     {% for i in itens %}
+    {% set gid = loop.index0 %}
     <tr>
       <td style="font-family:var(--mono);font-size:.74rem;white-space:nowrap">{{ i.quando }}</td>
       <td style="font-size:.78rem">{{ i.usuario }}</td>
       <td style="font-size:.78rem">{{ i.share }}</td>
       <td style="font-family:var(--mono);font-size:.74rem;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ i.arquivo }}">
-        {{ '📁' if i.tipo == 'pasta' else '📄' }} {{ i.arquivo }}{% if i.tipo == 'pasta' %} <span class="text-muted">({{ i.n }} arquivo{{ 's' if i.n > 1 }})</span>{% endif %}
+        {% if i.tipo == 'pasta' %}
+        <span style="cursor:pointer" onclick="lxToggle({{ gid }})" title="Clique para ver os arquivos da pasta">
+          <span id="lxSeta{{ gid }}">▸</span> 📁 {{ i.arquivo }} <span class="text-muted">({{ i.n }} arquivo{{ 's' if i.n > 1 }})</span>
+        </span>
+        {% else %}📄 {{ i.arquivo }}{% endif %}
       </td>
       <td style="font-size:.76rem;white-space:nowrap">{{ i.tam }}</td>
       <td class="text-right" style="white-space:nowrap">
@@ -2654,9 +2667,47 @@ LIXEIRA_T = BASE_T.replace("__BODY__", """
         </form>
       </td>
     </tr>
+    {% for f in i.filhos %}
+    <tr class="lxg{{ gid }}" style="display:none;background:var(--bg3)">
+      <td style="font-family:var(--mono);font-size:.72rem;white-space:nowrap">{{ f.quando }}</td>
+      <td></td><td></td>
+      <td style="font-family:var(--mono);font-size:.72rem;padding-left:1.8rem;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ f.nome }}">↳ {{ f.nome }}</td>
+      <td style="font-size:.74rem;white-space:nowrap">{{ f.tam }}</td>
+      <td class="text-right" style="white-space:nowrap">
+        <form method="post" action="{{ url_for('lixeira_restaurar') }}" style="display:inline"
+              onsubmit="return confirm('Restaurar apenas este arquivo para o share {{ i.share }}?')">
+          <input type="hidden" name="rel" value="{{ f.rel }}">
+          <button type="submit" class="btn btn-xs" title="Restaurar só este arquivo">↩️</button>
+        </form>
+        <a href="{{ url_for('lixeira_baixar') }}?p={{ f.rel | urlencode }}" class="btn btn-xs" title="Baixar">⬇️</a>
+        <form method="post" action="{{ url_for('lixeira_excluir') }}" style="display:inline"
+              onsubmit="return confirm('Excluir DEFINITIVAMENTE este arquivo?')">
+          <input type="hidden" name="rel" value="{{ f.rel }}">
+          <button type="submit" class="btn btn-xs" title="Excluir definitivamente">✖</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    {% if i.tipo == 'pasta' and i.n > i.filhos|length %}
+    <tr class="lxg{{ gid }}" style="display:none;background:var(--bg3)">
+      <td colspan="6" class="text-muted" style="font-size:.74rem;padding-left:1.8rem">
+        … e mais {{ i.n - i.filhos|length }} arquivos — para ver todos, acesse a pasta pelo Windows em \\\\{{ server_ip }}\\Recycle
+      </td>
+    </tr>
+    {% endif %}
     {% endfor %}
     </tbody>
   </table>
+  <script>
+  function lxToggle(g) {
+    var seta = document.getElementById("lxSeta" + g);
+    var aberto = seta.textContent === "▾";
+    seta.textContent = aberto ? "▸" : "▾";
+    document.querySelectorAll(".lxg" + g).forEach(function(tr) {
+      tr.style.display = aberto ? "none" : "";
+    });
+  }
+  </script>
   <div style="padding:.5rem .9rem;border-top:1px solid var(--border)">
     <p class="text-muted" style="font-size:.74rem;margin:0">
       Também acessível pelo Windows: digite \\\\{{ server_ip }}\\Recycle na barra
