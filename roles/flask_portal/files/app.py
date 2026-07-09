@@ -21,6 +21,7 @@ FQDN         = f"{app.config.get('SERVER_HOSTNAME', 'smb')}.{app.config.get('DOM
 PORTAL_DIR   = os.path.dirname(os.path.abspath(__file__))
 BANNER_DIR   = os.path.join(PORTAL_DIR, 'banners')
 SMB_CONF     = '/etc/samba/smb.conf'
+RECYCLE_ROOT = os.path.join(os.path.dirname(SAMBA_ROOT.rstrip('/')), 'recycle')
 BACKUP_DIR      = app.config.get('BACKUP_DIR', '/opt/backups')
 BACKUP_INFO_FILE = os.path.join(PORTAL_DIR, '.backup_info.json')
 PERMS_FILE   = os.path.join(PORTAL_DIR, 'permissions.json')
@@ -614,6 +615,9 @@ BASE_T = """<!DOCTYPE html><html lang="pt-BR">
     <i class="ti ti-folders sidebar-icon" aria-hidden="true"></i> Compartilhamentos
   </a>
   {% if is_admin %}
+  <a href="{{ url_for('lixeira_page') }}" class="{{ 'active' if active=='lixeira' else '' }}">
+    <i class="ti ti-trash sidebar-icon" aria-hidden="true"></i> Lixeira
+  </a>
   <div class="sidebar-section">Administração</div>
   <a href="{{ url_for('users_page') }}" class="{{ 'active' if active=='users' else '' }}">
     <i class="ti ti-users sidebar-icon" aria-hidden="true"></i> Usuários
@@ -2498,6 +2502,160 @@ def backup_delete():
     else:
         flash('Arquivo não encontrado', 'error')
     return redirect(url_for('backups_page'))
+
+# ── lixeira ────────────────────────────────────────────────────────────────────
+def lixeira_safe(rel: str) -> Path:
+    base = Path(RECYCLE_ROOT).resolve()
+    alvo = (base / rel).resolve()
+    if not str(alvo).startswith(str(base) + os.sep):
+        abort(403)
+    return alvo
+
+def get_lixeira(limite: int = 500) -> list[dict]:
+    """Arquivos excluídos (vfs recycle) — recycle/<usuario>/<share>/<caminho>."""
+    itens = []
+    try:
+        shares_validos = {d.name for d in Path(SAMBA_ROOT).iterdir() if d.is_dir()}
+    except Exception:
+        shares_validos = set()
+    for raiz, _dirs, arquivos in os.walk(RECYCLE_ROOT):
+        for nome in arquivos:
+            caminho = os.path.join(raiz, nome)
+            rel = os.path.relpath(caminho, RECYCLE_ROOT).replace('\\', '/')
+            comps = rel.split('/')
+            try:
+                st = os.stat(caminho)
+            except OSError:
+                continue
+            share = comps[1] if len(comps) >= 3 and comps[1] in shares_validos else ''
+            itens.append({
+                'rel': rel,
+                'usuario': comps[0],
+                'share': share or '—',
+                'arquivo': '/'.join(comps[2:]) if share else '/'.join(comps[1:]),
+                'tam': fmt_size(st.st_size),
+                'mtime': st.st_mtime,
+                'quando': datetime.fromtimestamp(st.st_mtime).strftime('%d/%m/%Y %H:%M'),
+                'restauravel': bool(share),
+            })
+    itens.sort(key=lambda i: i['mtime'], reverse=True)
+    return itens[:limite]
+
+LIXEIRA_T = BASE_T.replace("__BODY__", """
+<div class="page-title">🗑️ Lixeira</div>
+<div class="card">
+  <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+    <h3>Arquivos excluídos dos compartilhamentos</h3>
+    <form method="post" action="{{ url_for('lixeira_esvaziar') }}"
+          onsubmit="return confirm('Excluir DEFINITIVAMENTE todos os itens com mais de 30 dias?')">
+      <button type="submit" class="btn btn-xs">🧹 Esvaziar itens &gt; 30 dias</button>
+    </form>
+  </div>
+  {% if itens %}
+  <table>
+    <thead><tr><th>Excluído em</th><th>Por</th><th>Share</th><th>Arquivo</th><th>Tamanho</th><th class="text-right">Ações</th></tr></thead>
+    <tbody>
+    {% for i in itens %}
+    <tr>
+      <td style="font-family:var(--mono);font-size:.74rem;white-space:nowrap">{{ i.quando }}</td>
+      <td style="font-size:.78rem">{{ i.usuario }}</td>
+      <td style="font-size:.78rem">{{ i.share }}</td>
+      <td style="font-family:var(--mono);font-size:.74rem;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ i.arquivo }}">{{ i.arquivo }}</td>
+      <td style="font-size:.76rem;white-space:nowrap">{{ i.tam }}</td>
+      <td class="text-right" style="white-space:nowrap">
+        {% if i.restauravel %}
+        <form method="post" action="{{ url_for('lixeira_restaurar') }}" style="display:inline"
+              onsubmit="return confirm('Restaurar este arquivo para o share {{ i.share }}?')">
+          <input type="hidden" name="rel" value="{{ i.rel }}">
+          <button type="submit" class="btn btn-xs" title="Restaurar ao local de origem">↩️ Restaurar</button>
+        </form>
+        {% endif %}
+        <a href="{{ url_for('lixeira_baixar') }}?p={{ i.rel | urlencode }}" class="btn btn-xs" title="Baixar">⬇️</a>
+        <form method="post" action="{{ url_for('lixeira_excluir') }}" style="display:inline"
+              onsubmit="return confirm('Excluir DEFINITIVAMENTE este arquivo?')">
+          <input type="hidden" name="rel" value="{{ i.rel }}">
+          <button type="submit" class="btn btn-xs" title="Excluir definitivamente">✖</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div style="padding:.5rem .9rem;border-top:1px solid var(--border)">
+    <p class="text-muted" style="font-size:.74rem;margin:0">
+      Também acessível pelo Windows: digite \\\\{{ server_ip }}\\Recycle na barra
+      do Explorer (somente administradores; restaure recortando o arquivo de
+      volta para o share). Itens sem share identificado são de exclusões
+      antigas — use Baixar e salve manualmente no destino.
+    </p>
+  </div>
+  {% else %}
+  <div class="card-body">
+    <p class="text-muted" style="font-size:.82rem">
+      Lixeira vazia. Arquivos excluídos dos shares aparecem aqui e podem
+      ser restaurados ao local de origem.
+    </p>
+  </div>
+  {% endif %}
+</div>
+""")
+
+@app.route('/admin/lixeira')
+@admin_required
+def lixeira_page():
+    return render_template_string(LIXEIRA_T, itens=get_lixeira(),
+        server_ip=app.config.get('SERVER_IP', ''),
+        session=session, banner=get_banner(), active='lixeira', is_admin=True)
+
+@app.route('/admin/lixeira/restaurar', methods=['POST'])
+@admin_required
+def lixeira_restaurar():
+    rel = request.form.get('rel', '')
+    origem = lixeira_safe(rel)
+    comps = rel.replace('\\', '/').split('/')
+    if not origem.is_file() or len(comps) < 3:
+        flash('Item inválido ou sem share de origem identificado.', 'error')
+        return redirect(url_for('lixeira_page'))
+    destino = Path(SAMBA_ROOT) / comps[1] / Path(*comps[2:])
+    if destino.exists():
+        sufixo = datetime.now().strftime(' (restaurado %d-%m-%Y %H%M%S)')
+        destino = destino.with_name(destino.stem + sufixo + destino.suffix)
+    rc1, _, e1 = run(['sudo', 'mkdir', '-p', str(destino.parent)])
+    rc2, _, e2 = run(['sudo', 'mv', str(origem), str(destino)])
+    if rc1 == 0 and rc2 == 0:
+        flash(f'Restaurado para {destino}', 'success')
+    else:
+        flash(f'Falha ao restaurar: {e1 or e2}', 'error')
+    return redirect(url_for('lixeira_page'))
+
+@app.route('/admin/lixeira/baixar')
+@admin_required
+def lixeira_baixar():
+    alvo = lixeira_safe(request.args.get('p', ''))
+    if not alvo.is_file():
+        abort(404)
+    return send_file(str(alvo), as_attachment=True, download_name=alvo.name)
+
+@app.route('/admin/lixeira/excluir', methods=['POST'])
+@admin_required
+def lixeira_excluir():
+    alvo = lixeira_safe(request.form.get('rel', ''))
+    if not alvo.is_file():
+        abort(404)
+    rc, _, err = run(['sudo', 'rm', '-f', str(alvo)])
+    flash('Excluído definitivamente.' if rc == 0 else f'Falha: {err}',
+          'success' if rc == 0 else 'error')
+    return redirect(url_for('lixeira_page'))
+
+@app.route('/admin/lixeira/esvaziar', methods=['POST'])
+@admin_required
+def lixeira_esvaziar():
+    rc, _, err = run(['sudo', 'bash', '-c',
+        f'find {RECYCLE_ROOT} -type f -mtime +30 -delete; '
+        f'find {RECYCLE_ROOT} -mindepth 2 -type d -empty -delete'])
+    flash('Itens com mais de 30 dias removidos.' if rc == 0 else f'Falha: {err}',
+          'success' if rc == 0 else 'error')
+    return redirect(url_for('lixeira_page'))
 
 # ── logs ───────────────────────────────────────────────────────────────────────
 LOGS_T = BASE_T.replace("__BODY__", """

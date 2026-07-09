@@ -53,9 +53,10 @@
     unix charset         = UTF-8
     dos charset          = CP850
 
-    # Lixeira global
+    # Lixeira global — organizada por usuário/share para permitir a
+    # restauração ao local de origem (página Lixeira do portal)
     vfs objects          = recycle full_audit
-    recycle:repository   = {{ raid.mount }}/recycle/%U
+    recycle:repository   = {{ raid.mount }}/recycle/%U/%S
     recycle:keeptree     = yes
     recycle:versions     = yes
     recycle:touch        = yes
@@ -72,11 +73,14 @@
     full_audit:priority  = notice
 
 [Recycle]
-    comment     = Lixeira
+    comment     = Lixeira (restaure recortando de volta para o share)
     path        = {{ raid.mount }}/recycle
     valid users = {{ server.admin_user }}{% for u in samba.extra_admins %} {{ u }}{% endfor %}
-    writable    = no
+    # writable: admins restauram por recortar/colar e podem esvaziar
+    writable    = yes
     browseable  = no
+    # a lixeira do próprio Recycle seria recursiva — desativa o vfs aqui
+    vfs objects = full_audit
 
 {% for share in samba_shares %}
 {% set grp = share.group | default("grp_" + (share.name | lower)) %}

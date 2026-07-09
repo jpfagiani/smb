@@ -135,6 +135,15 @@
   changed_when: false
   ignore_errors: true
 
+# As lixeiras pessoais são 0700 de cada usuário — a ACL dá ao portal
+# leitura para a página Lixeira (com default ACL para itens futuros)
+- name: Configurar ACL para o portal ler a lixeira
+  ansible.builtin.shell: |
+    setfacl -R  -m u:{{ portal.user }}:rx {{ raid.mount }}/recycle
+    setfacl -R -d -m u:{{ portal.user }}:rx {{ raid.mount }}/recycle
+  changed_when: false
+  ignore_errors: true
+
 - name: Criar wrapper de alteração de senha (evita auditoria do sudo)
   ansible.builtin.copy:
     dest: /usr/local/bin/cdpni-setpass
