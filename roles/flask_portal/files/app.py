@@ -445,16 +445,34 @@ def get_audit_log(lines: int = 200) -> list[dict]:
     return eventos
 
 def backup_running():
-    """Retorna (is_running, info_dict) para o backup em andamento."""
+    """Retorna (is_running, info_dict) para o backup em andamento.
+
+    Não usa os.kill(pid, 0): ele responde sucesso até para processo
+    ZUMBI (terminado, aguardando o gunicorn colher) — o backup concluía
+    e a página ficava em "em andamento" para sempre. Lê o estado real
+    em /proc/<pid>/stat e confere o cmdline (proteção contra reuso de
+    pid após reboot).
+    """
     try:
         with open(BACKUP_INFO_FILE) as f:
             info = json.load(f)
         pid = info.get('pid')
         if pid:
             try:
-                os.kill(pid, 0)
+                with open(f'/proc/{pid}/stat') as fs:
+                    estado = fs.read().rsplit(')', 1)[1].split()[0]
+                if estado == 'Z':
+                    try:
+                        os.waitpid(pid, os.WNOHANG)  # colhe o zumbi se for nosso filho
+                    except ChildProcessError:
+                        pass
+                    return False, info
+                with open(f'/proc/{pid}/cmdline', 'rb') as fc:
+                    cmd = fc.read().decode(errors='ignore')
+                if 'backup' not in cmd and 'tar' not in cmd:
+                    return False, info
                 return True, info
-            except (ProcessLookupError, PermissionError):
+            except (FileNotFoundError, ProcessLookupError, IndexError):
                 return False, info
     except (FileNotFoundError, json.JSONDecodeError):
         pass
