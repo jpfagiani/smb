@@ -11,8 +11,12 @@ Group={{ portal.user }}
 SupplementaryGroups=shadow
 WorkingDirectory={{ portal.dir }}
 Environment=PYTHONDONTWRITEBYTECODE=1
+# AmbientCapabilities: o processo (não-root) precisa de setuid/setgid p/ PAM.
+# NUNCA usar CapabilityBoundingSet aqui: ele limita as capacidades de TODOS
+# os descendentes — inclusive root via sudo, que fica sem CAP_DAC_OVERRIDE
+# (rm/mv em pastas 0700 falham), sem CAP_SYS_ADMIN (mount do backup SMB e
+# mdadm falham) etc. Foi a causa de "Permissão negada" rodando como root.
 AmbientCapabilities=CAP_SETUID CAP_SETGID
-CapabilityBoundingSet=CAP_SETUID CAP_SETGID
 ExecStart={{ portal.dir }}/venv/bin/gunicorn \
     --workers 3 \
     --bind 127.0.0.1:{{ portal.port }} \

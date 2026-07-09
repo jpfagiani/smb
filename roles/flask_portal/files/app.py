@@ -2528,14 +2528,16 @@ def get_lixeira(limite: int = 500) -> list[dict]:
             except OSError:
                 continue
             share = comps[1] if len(comps) >= 3 and comps[1] in shares_validos else ''
+            # ctime = quando o arquivo ENTROU na lixeira; o mtime preserva a
+            # data original do arquivo (mostraria a criação, não a exclusão)
             itens.append({
                 'rel': rel,
                 'usuario': comps[0],
                 'share': share or '—',
                 'arquivo': '/'.join(comps[2:]) if share else '/'.join(comps[1:]),
                 'tam': fmt_size(st.st_size),
-                'mtime': st.st_mtime,
-                'quando': datetime.fromtimestamp(st.st_mtime).strftime('%d/%m/%Y %H:%M'),
+                'mtime': st.st_ctime,
+                'quando': datetime.fromtimestamp(st.st_ctime).strftime('%d/%m/%Y %H:%M'),
                 'restauravel': bool(share),
             })
     itens.sort(key=lambda i: i['mtime'], reverse=True)
