@@ -2474,7 +2474,7 @@ def backup_run():
                 f'exec >>{shlex.quote(log)} 2>&1; '
                 f'echo "=== $(date "+%d/%m/%Y %H:%M:%S") backup SMB para //{smb_host}/{smb_share} ==="; '
                 f'mkdir -p {shlex.quote(mnt)} && '
-                f'mount -t cifs //{smb_host}/{smb_share} {shlex.quote(mnt)} -o {smb_opts} && '
+                f'timeout 90 mount -t cifs //{smb_host}/{smb_share} {shlex.quote(mnt)} -o {smb_opts} && '
                 f'mkdir -p {shlex.quote(dest_dir)} && '
                 f'{tar} -czf {shlex.quote(out_file)} {tar_srcs} && '
                 f'echo "OK: backup concluído ({filename})" '
