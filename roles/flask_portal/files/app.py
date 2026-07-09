@@ -2563,76 +2563,94 @@ def lixeira_safe(rel: str) -> Path:
         abort(403)
     return alvo
 
-def get_lixeira(limite: int = 500) -> list[dict]:
-    """Itens excluídos (vfs recycle) — recycle/<usuario>/<share>/<caminho>.
+def _lx_info_dir(p: Path) -> tuple:
+    """(bytes, n_arquivos, ctime mais recente) de uma pasta da lixeira."""
+    total, n, mt = 0, 0, 0.0
+    for raiz, _d, arqs in os.walk(p):
+        for a in arqs:
+            try:
+                st = os.stat(os.path.join(raiz, a))
+            except OSError:
+                continue
+            total += st.st_size
+            n += 1
+            mt = max(mt, st.st_ctime)
+    if mt == 0.0:
+        try:
+            mt = p.stat().st_ctime
+        except OSError:
+            pass
+    return total, n, mt
 
-    Arquivos dentro de pastas agrupam pela UNIDADE EXCLUÍDA: o ancestral
-    mais alto que não existe mais no share (ex.: JEAN/DOCUMENTOS/ quando
-    só a subpasta DOCUMENTOS foi excluída). Se todos os ancestrais ainda
-    existem (restauração parcial ou exclusão de arquivos de pasta viva),
-    agrupa pela pasta-mãe completa — nada fica solto. Arquivos excluídos
-    da raiz do share ficam como linha própria.
+def _lx_item(ent: Path, usuario: str, share: str, rel: str, restauravel: bool) -> dict:
+    if ent.is_dir():
+        total, n, mt = _lx_info_dir(ent)
+        tipo, nome = 'pasta', ent.name + '/'
+    else:
+        try:
+            st = ent.stat()
+        except OSError:
+            st = None
+        total = st.st_size if st else 0
+        n, mt = 1, (st.st_ctime if st else 0.0)
+        tipo, nome = 'arquivo', ent.name
+    return {
+        'tipo': tipo, 'rel': rel, 'usuario': usuario, 'share': share,
+        'nome': nome, 'n': n, 'tam': fmt_size(total), 'mtime': mt,
+        'quando': datetime.fromtimestamp(mt).strftime('%d/%m/%Y %H:%M') if mt else '—',
+        'restauravel': restauravel,
+    }
+
+def lixeira_listar(rel: str = '') -> list[dict]:
+    """Lista UM nível da lixeira, navegável como o Explorer.
+
+    rel=''  → unidades excluídas (recycle/<usuario>/<share>/*)
+    rel='usuario/share/sub/...' → conteúdo daquela pasta
+    Espelha a visão do share \\servidor\\Recycle no Windows.
     """
-    itens: dict = {}
+    base = Path(RECYCLE_ROOT)
     try:
         shares_validos = {d.name for d in Path(SAMBA_ROOT).iterdir() if d.is_dir()}
     except Exception:
         shares_validos = set()
-    for raiz, _dirs, arquivos in os.walk(RECYCLE_ROOT):
-        for nome in arquivos:
-            caminho = os.path.join(raiz, nome)
-            rel = os.path.relpath(caminho, RECYCLE_ROOT).replace('\\', '/')
-            comps = rel.split('/')
-            try:
-                st = os.stat(caminho)
-            except OSError:
+    itens = []
+    if not rel:
+        if not base.is_dir():
+            return itens
+        for udir in sorted(base.iterdir()):
+            if not udir.is_dir():
                 continue
-            share = comps[1] if len(comps) >= 3 and comps[1] in shares_validos else ''
-            chave, tipo = rel, 'arquivo'
-            exibe = '/'.join(comps[2:]) if share else '/'.join(comps[1:])
-            if share and len(comps) > 3:
-                idx = None
-                for i in range(2, len(comps) - 1):
-                    if not os.path.isdir(os.path.join(SAMBA_ROOT, comps[1], *comps[2:i + 1])):
-                        idx = i
-                        break
-                if idx is None:
-                    idx = len(comps) - 2  # tudo existe: agrupa pela pasta-mãe
-                chave = '/'.join(comps[:idx + 1])
-                tipo = 'pasta'
-                exibe = '/'.join(comps[2:idx + 1]) + '/'
-            it = itens.get(chave)
-            if it is None:
-                itens[chave] = it = {
-                    'rel': chave, 'tipo': tipo, 'usuario': comps[0],
-                    'share': share or '—', 'arquivo': exibe,
-                    'bytes': 0, 'n': 0, 'mtime': 0.0,
-                    'restauravel': bool(share), 'filhos': [],
-                }
-            it['bytes'] += st.st_size
-            it['n'] += 1
-            # ctime = quando entrou na lixeira (mtime preserva a data original)
-            it['mtime'] = max(it['mtime'], st.st_ctime)
-            if tipo == 'pasta' and len(it['filhos']) < 200:
-                it['filhos'].append({
-                    'rel': rel,
-                    'nome': '/'.join(comps[len(chave.split('/')):]),
-                    'tam': fmt_size(st.st_size),
-                    'quando': datetime.fromtimestamp(st.st_ctime).strftime('%d/%m/%Y %H:%M'),
-                })
-    lista = list(itens.values())
-    for it in lista:
-        it['tam'] = fmt_size(it['bytes'])
-        it['quando'] = datetime.fromtimestamp(it['mtime']).strftime('%d/%m/%Y %H:%M')
-        it['filhos'].sort(key=lambda f: f['nome'])
-    lista.sort(key=lambda i: i['mtime'], reverse=True)
-    return lista[:limite]
+            for ent in sorted(udir.iterdir(), key=lambda e: e.name.lower()):
+                if ent.is_dir() and ent.name in shares_validos:
+                    for sub in sorted(ent.iterdir(), key=lambda e: (e.is_file(), e.name.lower())):
+                        itens.append(_lx_item(sub, udir.name, ent.name,
+                                              f'{udir.name}/{ent.name}/{sub.name}', True))
+                else:
+                    # layout antigo (sem share) — só baixar/excluir
+                    itens.append(_lx_item(ent, udir.name, '—',
+                                          f'{udir.name}/{ent.name}', False))
+        itens.sort(key=lambda i: i['mtime'], reverse=True)
+    else:
+        alvo = lixeira_safe(rel)
+        comps = rel.split('/')
+        usuario = comps[0]
+        share = comps[1] if len(comps) > 1 and comps[1] in shares_validos else '—'
+        for ent in sorted(alvo.iterdir(), key=lambda e: (e.is_file(), e.name.lower())):
+            itens.append(_lx_item(ent, usuario, share,
+                                  f'{rel}/{ent.name}', share != '—'))
+    return itens
 
 LIXEIRA_T = BASE_T.replace("__BODY__", """
 <div class="page-title">🗑️ Lixeira</div>
 <div class="card">
   <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
-    <h3>Arquivos excluídos dos compartilhamentos</h3>
+    <h3>
+      <a href="{{ url_for('lixeira_page') }}" style="text-decoration:none">Lixeira</a>
+      {%- for nome, p in crumbs %} <span class="text-muted">/</span>
+      {%- if loop.last %} {{ nome }}
+      {%- else %} <a href="{{ url_for('lixeira_page') }}?p={{ p | urlencode }}" style="text-decoration:none">{{ nome }}</a>
+      {%- endif %}{% endfor %}
+    </h3>
     <form method="post" action="{{ url_for('lixeira_esvaziar') }}"
           onsubmit="return confirm('Excluir DEFINITIVAMENTE todos os itens com mais de 30 dias?')">
       <button type="submit" class="btn btn-xs">🧹 Esvaziar itens &gt; 30 dias</button>
@@ -2640,27 +2658,27 @@ LIXEIRA_T = BASE_T.replace("__BODY__", """
   </div>
   {% if itens %}
   <table>
-    <thead><tr><th>Excluído em</th><th>Por</th><th>Share</th><th>Arquivo</th><th>Tamanho</th><th class="text-right">Ações</th></tr></thead>
+    <thead><tr><th>Excluído em</th><th>Por</th><th>Share</th><th>Nome</th><th>Tamanho</th><th class="text-right">Ações</th></tr></thead>
     <tbody>
     {% for i in itens %}
-    {% set gid = loop.index0 %}
     <tr>
       <td style="font-family:var(--mono);font-size:.74rem;white-space:nowrap">{{ i.quando }}</td>
       <td style="font-size:.78rem">{{ i.usuario }}</td>
       <td style="font-size:.78rem">{{ i.share }}</td>
-      <td style="font-family:var(--mono);font-size:.74rem;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ i.arquivo }}">
+      <td style="font-family:var(--mono);font-size:.74rem;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ i.nome }}">
         {% if i.tipo == 'pasta' %}
-        <span style="cursor:pointer" onclick="lxToggle({{ gid }})" title="Clique para ver os arquivos da pasta">
-          <span id="lxSeta{{ gid }}">▸</span> 📁 {{ i.arquivo }} <span class="text-muted">({{ i.n }} arquivo{{ 's' if i.n > 1 }})</span>
-        </span>
-        {% else %}📄 {{ i.arquivo }}{% endif %}
+        <a href="{{ url_for('lixeira_page') }}?p={{ i.rel | urlencode }}" style="text-decoration:none" title="Abrir pasta">
+          📁 {{ i.nome }}
+        </a> <span class="text-muted">({{ i.n }} arquivo{{ 's' if i.n != 1 }})</span>
+        {% else %}📄 {{ i.nome }}{% endif %}
       </td>
       <td style="font-size:.76rem;white-space:nowrap">{{ i.tam }}</td>
       <td class="text-right" style="white-space:nowrap">
         {% if i.restauravel %}
         <form method="post" action="{{ url_for('lixeira_restaurar') }}" style="display:inline"
-              onsubmit="return confirm('Restaurar {{ 'esta pasta inteira' if i.tipo == 'pasta' else 'este arquivo' }} para o share {{ i.share }}?')">
+              onsubmit="return confirm('Restaurar {{ 'esta pasta e todo o conteúdo' if i.tipo == 'pasta' else 'este arquivo' }} para o share {{ i.share }}?')">
           <input type="hidden" name="rel" value="{{ i.rel }}">
+          <input type="hidden" name="voltar" value="{{ rel }}">
           <button type="submit" class="btn btn-xs" title="Restaurar ao local de origem">↩️ Restaurar</button>
         </form>
         {% endif %}
@@ -2670,64 +2688,26 @@ LIXEIRA_T = BASE_T.replace("__BODY__", """
         <form method="post" action="{{ url_for('lixeira_excluir') }}" style="display:inline"
               onsubmit="return confirm('Excluir DEFINITIVAMENTE {{ 'esta pasta e todo o conteúdo' if i.tipo == 'pasta' else 'este arquivo' }}?')">
           <input type="hidden" name="rel" value="{{ i.rel }}">
+          <input type="hidden" name="voltar" value="{{ rel }}">
           <button type="submit" class="btn btn-xs" title="Excluir definitivamente">✖</button>
         </form>
       </td>
     </tr>
-    {% for f in i.filhos %}
-    <tr class="lxg{{ gid }}" style="display:none;background:var(--bg3)">
-      <td style="font-family:var(--mono);font-size:.72rem;white-space:nowrap">{{ f.quando }}</td>
-      <td></td><td></td>
-      <td style="font-family:var(--mono);font-size:.72rem;padding-left:1.8rem;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ f.nome }}">↳ {{ f.nome }}</td>
-      <td style="font-size:.74rem;white-space:nowrap">{{ f.tam }}</td>
-      <td class="text-right" style="white-space:nowrap">
-        <form method="post" action="{{ url_for('lixeira_restaurar') }}" style="display:inline"
-              onsubmit="return confirm('Restaurar apenas este arquivo para o share {{ i.share }}?')">
-          <input type="hidden" name="rel" value="{{ f.rel }}">
-          <button type="submit" class="btn btn-xs" title="Restaurar só este arquivo">↩️</button>
-        </form>
-        <a href="{{ url_for('lixeira_baixar') }}?p={{ f.rel | urlencode }}" class="btn btn-xs" title="Baixar">⬇️</a>
-        <form method="post" action="{{ url_for('lixeira_excluir') }}" style="display:inline"
-              onsubmit="return confirm('Excluir DEFINITIVAMENTE este arquivo?')">
-          <input type="hidden" name="rel" value="{{ f.rel }}">
-          <button type="submit" class="btn btn-xs" title="Excluir definitivamente">✖</button>
-        </form>
-      </td>
-    </tr>
-    {% endfor %}
-    {% if i.tipo == 'pasta' and i.n > i.filhos|length %}
-    <tr class="lxg{{ gid }}" style="display:none;background:var(--bg3)">
-      <td colspan="6" class="text-muted" style="font-size:.74rem;padding-left:1.8rem">
-        … e mais {{ i.n - i.filhos|length }} arquivos — para ver todos, acesse a pasta pelo Windows em \\\\{{ server_ip }}\\Recycle
-      </td>
-    </tr>
-    {% endif %}
     {% endfor %}
     </tbody>
   </table>
-  <script>
-  function lxToggle(g) {
-    var seta = document.getElementById("lxSeta" + g);
-    var aberto = seta.textContent === "▾";
-    seta.textContent = aberto ? "▸" : "▾";
-    document.querySelectorAll(".lxg" + g).forEach(function(tr) {
-      tr.style.display = aberto ? "none" : "";
-    });
-  }
-  </script>
   <div style="padding:.5rem .9rem;border-top:1px solid var(--border)">
     <p class="text-muted" style="font-size:.74rem;margin:0">
-      Também acessível pelo Windows: digite \\\\{{ server_ip }}\\Recycle na barra
-      do Explorer (somente administradores; restaure recortando o arquivo de
-      volta para o share). Itens sem share identificado são de exclusões
-      antigas — use Baixar e salve manualmente no destino.
+      Clique nas pastas para navegar, como no Explorer. Também acessível pelo
+      Windows: \\\\{{ server_ip }}\\Recycle (somente administradores). Itens
+      sem share identificado (—) são de exclusões antigas — use Baixar e
+      salve manualmente no destino.
     </p>
   </div>
   {% else %}
   <div class="card-body">
     <p class="text-muted" style="font-size:.82rem">
-      Lixeira vazia. Arquivos excluídos dos shares aparecem aqui e podem
-      ser restaurados ao local de origem.
+      {{ 'Pasta vazia.' if rel else 'Lixeira vazia. Arquivos excluídos dos shares aparecem aqui e podem ser restaurados ao local de origem.' }}
     </p>
   </div>
   {% endif %}
@@ -2737,7 +2717,17 @@ LIXEIRA_T = BASE_T.replace("__BODY__", """
 @app.route('/admin/lixeira')
 @admin_required
 def lixeira_page():
-    return render_template_string(LIXEIRA_T, itens=get_lixeira(),
+    rel = request.args.get('p', '').strip('/')
+    if rel:
+        alvo = lixeira_safe(rel)
+        if not alvo.is_dir():
+            abort(404)
+    crumbs, acc = [], ''
+    for parte in (rel.split('/') if rel else []):
+        acc = f'{acc}/{parte}'.strip('/')
+        crumbs.append((parte, acc))
+    return render_template_string(LIXEIRA_T, itens=lixeira_listar(rel),
+        rel=rel, crumbs=crumbs,
         server_ip=app.config.get('SERVER_IP', ''),
         session=session, banner=get_banner(), active='lixeira', is_admin=True)
 
@@ -2745,11 +2735,12 @@ def lixeira_page():
 @admin_required
 def lixeira_restaurar():
     rel = request.form.get('rel', '')
+    voltar = request.form.get('voltar', '').strip('/')
     origem = lixeira_safe(rel)
     comps = rel.replace('\\', '/').split('/')
     if not origem.exists() or len(comps) < 3:
         flash('Item inválido ou sem share de origem identificado.', 'error')
-        return redirect(url_for('lixeira_page'))
+        return redirect(url_for('lixeira_page', p=voltar) if voltar else url_for('lixeira_page'))
     destino = Path(SAMBA_ROOT) / comps[1] / Path(*comps[2:])
     if origem.is_dir() and destino.is_dir():
         # A pasta já existe no share (ex.: restauração parcial anterior):
@@ -2762,7 +2753,7 @@ def lixeira_restaurar():
             flash(f'Conteúdo mesclado na pasta existente {destino}', 'success')
         else:
             flash(f'Falha ao restaurar: {err}', 'error')
-        return redirect(url_for('lixeira_page'))
+        return redirect(url_for('lixeira_page', p=voltar) if voltar else url_for('lixeira_page'))
     if destino.exists():
         sufixo = datetime.now().strftime(' (restaurado %d-%m-%Y %H%M%S)')
         destino = destino.with_name(destino.stem + sufixo + destino.suffix)
@@ -2772,7 +2763,7 @@ def lixeira_restaurar():
         flash(f'Restaurado para {destino}', 'success')
     else:
         flash(f'Falha ao restaurar: {e1 or e2}', 'error')
-    return redirect(url_for('lixeira_page'))
+    return redirect(url_for('lixeira_page', p=voltar) if voltar else url_for('lixeira_page'))
 
 @app.route('/admin/lixeira/baixar')
 @admin_required
@@ -2786,12 +2777,13 @@ def lixeira_baixar():
 @admin_required
 def lixeira_excluir():
     alvo = lixeira_safe(request.form.get('rel', ''))
+    voltar = request.form.get('voltar', '').strip('/')
     if not alvo.exists():
         abort(404)
     rc, _, err = run(['sudo', 'rm', '-rf', str(alvo)])
     flash('Excluído definitivamente.' if rc == 0 else f'Falha: {err}',
           'success' if rc == 0 else 'error')
-    return redirect(url_for('lixeira_page'))
+    return redirect(url_for('lixeira_page', p=voltar) if voltar else url_for('lixeira_page'))
 
 @app.route('/admin/lixeira/esvaziar', methods=['POST'])
 @admin_required
