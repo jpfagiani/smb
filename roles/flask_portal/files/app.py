@@ -2346,7 +2346,10 @@ def backups_page():
     running, bk_info = backup_running()
     backup_log = ''
     if os.path.exists('/var/log/cdpni_backup.log'):
-        _, backup_log, _ = run(['sudo', 'tail', '-n15', '/var/log/cdpni_backup.log'])
+        _, saida, _ = run(['sudo', 'tail', '-n40', '/var/log/cdpni_backup.log'])
+        # mostra apenas a ÚLTIMA execução (blocos separados por "=== data ===")
+        blocos = re.split(r'(?=^=== )', saida, flags=re.M)
+        backup_log = blocos[-1].strip() if blocos else saida
     return render_template_string(BACKUPS_T,
         backups=get_backups(), backup_dir=BACKUP_DIR, samba_root=SAMBA_ROOT,
         backup_running=running, bk_info=bk_info, backup_log=backup_log,
@@ -2481,7 +2484,9 @@ def backup_run():
             sub_path = smb_sub.replace('\\', '/') if smb_sub else ''
             dest_dir = os.path.join(mnt, sub_path) if sub_path else mnt
             out_file = os.path.join(dest_dir, filename)
-            tar_srcs = ' '.join(shlex.quote(t) for t in targets)
+            # caminhos relativos + tar -C /: evita o aviso "Removendo '/'
+            # inicial dos nomes dos membros" que assustava no log
+            tar_srcs = ' '.join(shlex.quote(t.lstrip('/')) for t in targets)
             # Sem vers= fixo: o kernel negocia a maior versão SMB que o
             # destino suportar (vers=3.0 fixo falhava em Windows antigos)
             smb_opts = shlex.quote(
@@ -2494,7 +2499,7 @@ def backup_run():
                 f'mkdir -p {shlex.quote(mnt)} && '
                 f'timeout 90 mount -t cifs //{smb_host}/{smb_share} {shlex.quote(mnt)} -o {smb_opts} && '
                 f'mkdir -p {shlex.quote(dest_dir)} && '
-                f'{tar} -czf {shlex.quote(out_file)} {tar_srcs} && '
+                f'{tar} -czf {shlex.quote(out_file)} -C / {tar_srcs} && '
                 f'echo "OK: backup concluído ({filename})" '
                 f'|| echo "ERRO: backup falhou — veja as mensagens acima"; '
                 f'umount {shlex.quote(mnt)} 2>/dev/null; '
@@ -2516,7 +2521,7 @@ def backup_run():
             run(['sudo', 'mkdir', '-p', dest])
             out_file = os.path.join(dest, filename)
             proc = subprocess.Popen(
-                ['sudo', tar, '-czf', out_file] + targets,
+                ['sudo', tar, '-czf', out_file, '-C', '/'] + [t.lstrip('/') for t in targets],
                 start_new_session=True
             )
             pgid = os.getpgid(proc.pid)
@@ -2559,8 +2564,13 @@ def lixeira_safe(rel: str) -> Path:
     return alvo
 
 def get_lixeira(limite: int = 500) -> list[dict]:
-    """Arquivos excluídos (vfs recycle) — recycle/<usuario>/<share>/<caminho>."""
-    itens = []
+    """Itens excluídos (vfs recycle) — recycle/<usuario>/<share>/<caminho>.
+
+    Pastas excluídas inteiras viram UMA linha (tipo 'pasta'): agrupa os
+    arquivos pelo ancestral mais alto que não existe mais no share. Um
+    arquivo excluído de uma pasta que ainda existe fica como linha própria.
+    """
+    itens: dict = {}
     try:
         shares_validos = {d.name for d in Path(SAMBA_ROOT).iterdir() if d.is_dir()}
     except Exception:
@@ -2575,20 +2585,33 @@ def get_lixeira(limite: int = 500) -> list[dict]:
             except OSError:
                 continue
             share = comps[1] if len(comps) >= 3 and comps[1] in shares_validos else ''
-            # ctime = quando o arquivo ENTROU na lixeira; o mtime preserva a
-            # data original do arquivo (mostraria a criação, não a exclusão)
-            itens.append({
-                'rel': rel,
-                'usuario': comps[0],
-                'share': share or '—',
-                'arquivo': '/'.join(comps[2:]) if share else '/'.join(comps[1:]),
-                'tam': fmt_size(st.st_size),
-                'mtime': st.st_ctime,
-                'quando': datetime.fromtimestamp(st.st_ctime).strftime('%d/%m/%Y %H:%M'),
-                'restauravel': bool(share),
-            })
-    itens.sort(key=lambda i: i['mtime'], reverse=True)
-    return itens[:limite]
+            chave, tipo = rel, 'arquivo'
+            exibe = '/'.join(comps[2:]) if share else '/'.join(comps[1:])
+            if share and len(comps) > 3:
+                for i in range(2, len(comps) - 1):
+                    if not os.path.isdir(os.path.join(SAMBA_ROOT, comps[1], *comps[2:i + 1])):
+                        chave = '/'.join(comps[:i + 1])
+                        tipo = 'pasta'
+                        exibe = '/'.join(comps[2:i + 1]) + '/'
+                        break
+            it = itens.get(chave)
+            if it is None:
+                itens[chave] = it = {
+                    'rel': chave, 'tipo': tipo, 'usuario': comps[0],
+                    'share': share or '—', 'arquivo': exibe,
+                    'bytes': 0, 'n': 0, 'mtime': 0.0,
+                    'restauravel': bool(share),
+                }
+            it['bytes'] += st.st_size
+            it['n'] += 1
+            # ctime = quando entrou na lixeira (mtime preserva a data original)
+            it['mtime'] = max(it['mtime'], st.st_ctime)
+    lista = list(itens.values())
+    for it in lista:
+        it['tam'] = fmt_size(it['bytes'])
+        it['quando'] = datetime.fromtimestamp(it['mtime']).strftime('%d/%m/%Y %H:%M')
+    lista.sort(key=lambda i: i['mtime'], reverse=True)
+    return lista[:limite]
 
 LIXEIRA_T = BASE_T.replace("__BODY__", """
 <div class="page-title">🗑️ Lixeira</div>
@@ -2609,19 +2632,23 @@ LIXEIRA_T = BASE_T.replace("__BODY__", """
       <td style="font-family:var(--mono);font-size:.74rem;white-space:nowrap">{{ i.quando }}</td>
       <td style="font-size:.78rem">{{ i.usuario }}</td>
       <td style="font-size:.78rem">{{ i.share }}</td>
-      <td style="font-family:var(--mono);font-size:.74rem;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ i.arquivo }}">{{ i.arquivo }}</td>
+      <td style="font-family:var(--mono);font-size:.74rem;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ i.arquivo }}">
+        {{ '📁' if i.tipo == 'pasta' else '📄' }} {{ i.arquivo }}{% if i.tipo == 'pasta' %} <span class="text-muted">({{ i.n }} arquivo{{ 's' if i.n > 1 }})</span>{% endif %}
+      </td>
       <td style="font-size:.76rem;white-space:nowrap">{{ i.tam }}</td>
       <td class="text-right" style="white-space:nowrap">
         {% if i.restauravel %}
         <form method="post" action="{{ url_for('lixeira_restaurar') }}" style="display:inline"
-              onsubmit="return confirm('Restaurar este arquivo para o share {{ i.share }}?')">
+              onsubmit="return confirm('Restaurar {{ 'esta pasta inteira' if i.tipo == 'pasta' else 'este arquivo' }} para o share {{ i.share }}?')">
           <input type="hidden" name="rel" value="{{ i.rel }}">
           <button type="submit" class="btn btn-xs" title="Restaurar ao local de origem">↩️ Restaurar</button>
         </form>
         {% endif %}
+        {% if i.tipo == 'arquivo' %}
         <a href="{{ url_for('lixeira_baixar') }}?p={{ i.rel | urlencode }}" class="btn btn-xs" title="Baixar">⬇️</a>
+        {% endif %}
         <form method="post" action="{{ url_for('lixeira_excluir') }}" style="display:inline"
-              onsubmit="return confirm('Excluir DEFINITIVAMENTE este arquivo?')">
+              onsubmit="return confirm('Excluir DEFINITIVAMENTE {{ 'esta pasta e todo o conteúdo' if i.tipo == 'pasta' else 'este arquivo' }}?')">
           <input type="hidden" name="rel" value="{{ i.rel }}">
           <button type="submit" class="btn btn-xs" title="Excluir definitivamente">✖</button>
         </form>
@@ -2662,7 +2689,7 @@ def lixeira_restaurar():
     rel = request.form.get('rel', '')
     origem = lixeira_safe(rel)
     comps = rel.replace('\\', '/').split('/')
-    if not origem.is_file() or len(comps) < 3:
+    if not origem.exists() or len(comps) < 3:
         flash('Item inválido ou sem share de origem identificado.', 'error')
         return redirect(url_for('lixeira_page'))
     destino = Path(SAMBA_ROOT) / comps[1] / Path(*comps[2:])
@@ -2689,9 +2716,9 @@ def lixeira_baixar():
 @admin_required
 def lixeira_excluir():
     alvo = lixeira_safe(request.form.get('rel', ''))
-    if not alvo.is_file():
+    if not alvo.exists():
         abort(404)
-    rc, _, err = run(['sudo', 'rm', '-f', str(alvo)])
+    rc, _, err = run(['sudo', 'rm', '-rf', str(alvo)])
     flash('Excluído definitivamente.' if rc == 0 else f'Falha: {err}',
           'success' if rc == 0 else 'error')
     return redirect(url_for('lixeira_page'))
