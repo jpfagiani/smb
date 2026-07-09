@@ -2334,6 +2334,27 @@ def backups_page():
         backup_running=running, bk_info=bk_info, backup_log=backup_log,
         session=session, banner=get_banner(), active='backups', is_admin=True)
 
+def smb_erro_amigavel(saida: str) -> str:
+    """Traduz os NT_STATUS do smbclient para mensagens acionáveis."""
+    mapa = {
+        'NT_STATUS_BAD_NETWORK_NAME':  'O compartilhamento não existe nessa máquina. '
+                                       'No Windows: botão direito na pasta → Propriedades → '
+                                       'Compartilhamento → Compartilhamento Avançado.',
+        'NT_STATUS_LOGON_FAILURE':     'Usuário ou senha do Windows incorretos.',
+        'NT_STATUS_ACCESS_DENIED':     'Acesso negado: o usuário informado não tem permissão '
+                                       'no compartilhamento.',
+        'NT_STATUS_HOST_UNREACHABLE':  'Máquina inacessível na rede.',
+        'NT_STATUS_IO_TIMEOUT':        'A máquina não respondeu (firewall do Windows?).',
+        'NT_STATUS_CONNECTION_REFUSED':'Conexão recusada — compartilhamento de arquivos '
+                                       'desativado ou firewall bloqueando a porta 445.',
+        'NT_STATUS_UNSUCCESSFUL':      'Falha ao conectar — confira IP/nome da máquina.',
+        'NT_STATUS_NOT_FOUND':         'Máquina não encontrada — confira o IP/nome.',
+    }
+    for chave, msg in mapa.items():
+        if chave in saida:
+            return msg
+    return saida.strip() or 'Falha ao conectar.'
+
 @app.route('/admin/backups/browse', methods=['POST'])
 @admin_required
 def backup_browse():
@@ -2350,7 +2371,7 @@ def backup_browse():
     rc, out, err = run(['smbclient', f'//{host}/{share}',
                         '-U', f'{user}%{pwd}', '-c', f'ls {smb_path}'])
     if rc != 0:
-        return jsonify({'error': (err or out).strip() or 'Falha ao conectar'})
+        return jsonify({'error': smb_erro_amigavel(err or out)})
     dirs = []
     for line in out.splitlines():
         m = _re.match(r'^  (.+?)\s{2,}([A-Z]+)\s+\d', line)
@@ -2426,6 +2447,14 @@ def backup_run():
             smb_pass  = request.form.get('smb_pass', '').strip()
             if not smb_host or not smb_share:
                 flash('Informe o IP e o nome do compartilhamento Windows.', 'error')
+                return redirect(url_for('backups_page'))
+            # Pré-teste: valida host/share/credenciais ANTES de iniciar —
+            # sem isso o backup "iniciava" e morria em silêncio no mount
+            rc_t, out_t, err_t = run(['smbclient', f'//{smb_host}/{smb_share}',
+                                      '-U', f'{smb_user}%{smb_pass}', '-c', 'ls'])
+            if rc_t != 0:
+                flash(f'Não foi possível acessar \\\\{smb_host}\\{smb_share}: '
+                      f'{smb_erro_amigavel(err_t or out_t)}', 'error')
                 return redirect(url_for('backups_page'))
             # Monta o compartilhamento CIFS e grava direto na rede (sem espaço local)
             import shlex
