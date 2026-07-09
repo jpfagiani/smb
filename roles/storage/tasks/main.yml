@@ -10,6 +10,26 @@
 #      membros não apaga o superbloco XFS antigo no meio da área de
 #      dados — esse "filesystem fantasma" reaparece no array novo e,
 #      sem formatar, o mount falha com "superbloco inválido").
+# Trava absoluta: os nomes sdX mudam entre boots (o disco do SO desta
+# máquina era sda na instalação do Debian e hoje é sdb). Se o disco que
+# hospeda o / aparecer em raid.devices, NADA roda.
+- name: Identificar o disco do sistema operacional
+  ansible.builtin.shell: |
+    SRC=$(findmnt -n -o SOURCE /)
+    PK=$(lsblk -no PKNAME "$SRC" 2>/dev/null | head -1)
+    echo "/dev/${PK:-$(basename "$SRC" | sed 's/[0-9]*$//')}"
+  register: disco_so
+  changed_when: false
+
+- name: Abortar se o disco do SO estiver na lista do RAID
+  ansible.builtin.assert:
+    that: (disco_so.stdout | trim) not in raid.devices
+    fail_msg: >-
+      PERIGO: {{ disco_so.stdout | trim }} hospeda o sistema operacional e
+      está listado em raid.devices ({{ raid.devices | join(', ') }}).
+      Os nomes sdX mudam entre boots — corrija o group_vars/all.yml
+      antes de continuar. Nenhuma alteração foi feita.
+
 - name: Tentar aproveitar RAID existente (proteção de dados)
   ansible.builtin.shell: |
     if ! findmnt -n {{ raid.mount }} >/dev/null 2>&1; then
