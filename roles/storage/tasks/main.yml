@@ -21,14 +21,25 @@
   register: disco_so
   changed_when: false
 
+# raid.devices deve usar caminhos ESTÁVEIS /dev/disk/by-id/... (gere com
+# scripts/raid_ids.sh) — resolve tudo para o nome real do kernel neste boot
+- name: Resolver dispositivos do RAID para nomes reais deste boot
+  ansible.builtin.shell: |
+    {% for d in raid.devices %}
+    readlink -f "{{ d }}" 2>/dev/null || echo "{{ d }}"
+    {% endfor %}
+  register: raid_devs_reais
+  changed_when: false
+
 - name: Abortar se o disco do SO estiver na lista do RAID
   ansible.builtin.assert:
-    that: (disco_so.stdout | trim) not in raid.devices
+    that: (disco_so.stdout | trim) not in raid_devs_reais.stdout_lines
     fail_msg: >-
       PERIGO: {{ disco_so.stdout | trim }} hospeda o sistema operacional e
       está listado em raid.devices ({{ raid.devices | join(', ') }}).
-      Os nomes sdX mudam entre boots — corrija o group_vars/all.yml
-      antes de continuar. Nenhuma alteração foi feita.
+      Os nomes sdX mudam entre boots — use caminhos estáveis: rode
+      scripts/raid_ids.sh e cole a saída no group_vars/all.yml.
+      Nenhuma alteração foi feita.
 
 - name: Tentar aproveitar RAID existente (proteção de dados)
   ansible.builtin.shell: |
@@ -51,7 +62,7 @@
 - name: Parar arrays md residuais nos discos selecionados (instalação limpa)
   ansible.builtin.shell: |
     for md in $(awk '/^md/{print $1}' /proc/mdstat); do
-        if mdadm --detail "/dev/$md" 2>/dev/null | grep -qE '{{ raid.devices | join("|") }}'; then
+        if mdadm --detail "/dev/$md" 2>/dev/null | grep -qE '{{ raid_devs_reais.stdout_lines | join("|") }}'; then
             umount -f "/dev/$md" 2>/dev/null || true
             mdadm --stop "/dev/$md"
         fi

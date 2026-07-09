@@ -388,8 +388,27 @@ read -rp "  Iniciar instalação? [s/N]: " _CONF
 # =============================================================================
 mkdir -p "${SCRIPT_DIR}/group_vars"
 
+# Converte os discos escolhidos para caminhos ESTÁVEIS /dev/disk/by-id
+# (baseados no WWN/serial) — os nomes sdX mudam entre boots e uma lista
+# por nome pode apontar para o disco errado no futuro
+disco_estavel() {
+    local dev="$1" alvo id melhor=""
+    alvo=$(readlink -f "$dev")
+    for id in /dev/disk/by-id/*; do
+        [[ "$id" == *-part* ]] && continue
+        [[ "$(readlink -f "$id")" == "$alvo" ]] || continue
+        case "$(basename "$id")" in
+            wwn-*) echo "$id"; return ;;
+            *)     [[ -z "$melhor" ]] && melhor="$id" ;;
+        esac
+    done
+    echo "${melhor:-$dev}"
+}
+
 _DISKS_YAML=""
-for _d in "${RAID_DISKS[@]}"; do _DISKS_YAML+="    - ${_d}"$'\n'; done
+for _d in "${RAID_DISKS[@]}"; do
+    _DISKS_YAML+="    - $(disco_estavel "$_d")"$'\n'
+done
 
 # Redes permitidas no firewall: RFC 1918 + faixas legadas CDPNI.
 # Se a rede escolhida não estiver coberta por nenhuma delas, é incluída —

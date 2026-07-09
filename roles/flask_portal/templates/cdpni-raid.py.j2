@@ -253,7 +253,8 @@ def expandir(dev: str) -> None:
     print(f'Expansão iniciada: {md} agora com {n_novo} discos. '
           f'O reshape leva horas (acompanhe nesta página); o filesystem será '
           f'expandido automaticamente ao terminar. '
-          f'Depois, inclua {dev} em raid.devices no group_vars/all.yml.')
+          f'Depois, atualize raid.devices no group_vars/all.yml — rode '
+          f'scripts/raid_ids.sh para gerar os caminhos estáveis.')
 
 
 def concluir_growfs() -> None:
