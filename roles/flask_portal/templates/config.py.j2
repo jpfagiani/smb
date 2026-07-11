@@ -1,6 +1,9 @@
 # Portal CDPNI — gerado pelo Ansible
 SAMBA_ROOT  = '{{ raid.mount }}/shares'
-ADMIN_USERS = ['{{ server.admin_user }}', 'cpd', 'supervisao']
+# Só o admin do servidor é administrador do portal por padrão. Os demais
+# são promovidos pelo painel (botão "Tornar Admin" → grupo cdpni-admins);
+# não fixe outros aqui, senão o painel não consegue rebaixá-los.
+ADMIN_USERS = ['{{ server.admin_user }}']
 SERVER_IP   = '{{ server.ip }}'
 DOMAIN      = '{{ server.domain }}'
 SERVER_HOSTNAME = '{{ server.hostname }}'

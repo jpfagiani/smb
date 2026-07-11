@@ -66,16 +66,30 @@
 
 # ── Usuários operacionais (admin + supervisao) ─────────────────────────────────
 
+# Descobre quem JÁ existe antes de criar: os grupos suplementares (acesso
+# aos shares + admin do portal via cdpni-admins) só são definidos na
+# CRIAÇÃO. Depois disso o painel é a autoridade — reaplicar o playbook não
+# rebaixa admins nem desfaz permissões alteradas no painel.
+- name: Descobrir usuários já existentes
+  ansible.builtin.getent:
+    database: passwd
+
 - name: Criar usuário administrador do servidor
   ansible.builtin.user:
     name: "{{ server.admin_user }}"
     comment: "Administrador CDPNI"
     shell: /usr/sbin/nologin
-    groups: "{{ samba_all_groups | join(',') }}"
-    append: false
     create_home: true
     password: "{{ samba.default_pass | password_hash('sha512') }}"
     update_password: on_create
+  no_log: true
+
+- name: Definir grupos do admin (apenas na criação)
+  ansible.builtin.user:
+    name: "{{ server.admin_user }}"
+    groups: "{{ samba_all_groups | join(',') }}"
+    append: false
+  when: server.admin_user not in ansible_facts.getent_passwd
   no_log: true
 
 - name: Criar usuários operacionais (jpfagiani, rcborges, cpd, supervisao)
@@ -84,12 +98,19 @@
     comment: "{{ item.fullname }}"
     shell: /usr/sbin/nologin
     group: "{{ item.primary }}"
-    groups: "{{ item.groups }}"
-    append: false
     create_home: true
     password: "{{ samba.default_pass | password_hash('sha512') }}"
     update_password: on_create
   loop: "{{ samba_users }}"
+  no_log: true
+
+- name: Definir grupos dos usuários operacionais (apenas na criação)
+  ansible.builtin.user:
+    name: "{{ item.login }}"
+    groups: "{{ item.groups }}"
+    append: false
+  loop: "{{ samba_users }}"
+  when: item.login not in ansible_facts.getent_passwd
   no_log: true
 
 - name: Registrar admin do servidor no Samba
