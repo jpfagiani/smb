@@ -332,29 +332,39 @@ while true; do
         [[ "$_ok" == false ]] && continue
         mapfile -t RAID_DISKS < <(printf '%s\n' "${RAID_DISKS[@]}" | awk '!seen[$0]++')
     fi
-    [[ ${#RAID_DISKS[@]} -ge 2 ]] && break
-    warn "Mínimo 2 discos"
+    [[ ${#RAID_DISKS[@]} -ge 1 ]] && break
+    warn "Selecione ao menos 1 disco"
 done
+if [[ ${#RAID_DISKS[@]} -eq 1 ]]; then
+    warn "APENAS 1 DISCO: instalação SEM RAID (modo disco único)."
+    warn "Uma falha desse disco perde os dados — mantenha backups em dia."
+fi
 
 # Nível RAID
 N=${#RAID_DISKS[@]}
-echo ""
-echo -e "  ${BOLD}Níveis disponíveis para ${N} disco(s):${NC}"
-declare -a RAID_OPTS=()
-[[ $N -ge 2 ]] && { RAID_OPTS+=(1);  echo -e "  ${CYAN}[1]${NC}  RAID 1  — espelho        capacidade: 1×disco   tolera: $((N-1)) falha(s)"; }
-[[ $N -ge 3 ]] && { RAID_OPTS+=(5);  echo -e "  ${CYAN}[5]${NC}  RAID 5  — paridade        capacidade: $((N-1))×disco   tolera: 1 falha"; }
-[[ $N -ge 4 ]] && { RAID_OPTS+=(6);  echo -e "  ${CYAN}[6]${NC}  RAID 6  — dupla paridade  capacidade: $((N-2))×disco   tolera: 2 falhas"; }
-(( N >= 4 && N % 2 == 0 )) && { RAID_OPTS+=(10); echo -e "  ${CYAN}[10]${NC} RAID 10 — espelho+stripe  capacidade: $((N/2))×disco   tolera: 1/par"; }
-[[ $N -ge 4 ]] && _DEF_RAID=5 || _DEF_RAID=1
+if [[ $N -eq 1 ]]; then
+    # Disco único: sem RAID (level 0 = modo disco único no role storage)
+    RAID_LEVEL=0
+    info "Modo disco único selecionado (sem RAID)."
+else
+    echo ""
+    echo -e "  ${BOLD}Níveis disponíveis para ${N} disco(s):${NC}"
+    declare -a RAID_OPTS=()
+    [[ $N -ge 2 ]] && { RAID_OPTS+=(1);  echo -e "  ${CYAN}[1]${NC}  RAID 1  — espelho        capacidade: 1×disco   tolera: $((N-1)) falha(s)"; }
+    [[ $N -ge 3 ]] && { RAID_OPTS+=(5);  echo -e "  ${CYAN}[5]${NC}  RAID 5  — paridade        capacidade: $((N-1))×disco   tolera: 1 falha"; }
+    [[ $N -ge 4 ]] && { RAID_OPTS+=(6);  echo -e "  ${CYAN}[6]${NC}  RAID 6  — dupla paridade  capacidade: $((N-2))×disco   tolera: 2 falhas"; }
+    (( N >= 4 && N % 2 == 0 )) && { RAID_OPTS+=(10); echo -e "  ${CYAN}[10]${NC} RAID 10 — espelho+stripe  capacidade: $((N/2))×disco   tolera: 1/par"; }
+    [[ $N -ge 4 ]] && _DEF_RAID=5 || _DEF_RAID=1
 
-while true; do
-    ask "Nível de RAID [${_DEF_RAID}]:"
-    read -rp "  > " _IN; RAID_LEVEL="${_IN:-$_DEF_RAID}"
-    _found=false
-    for _o in "${RAID_OPTS[@]}"; do [[ "$_o" == "$RAID_LEVEL" ]] && _found=true && break; done
-    [[ "$_found" == true ]] && break
-    warn "Nível inválido para ${N} disco(s). Opções: ${RAID_OPTS[*]}"
-done
+    while true; do
+        ask "Nível de RAID [${_DEF_RAID}]:"
+        read -rp "  > " _IN; RAID_LEVEL="${_IN:-$_DEF_RAID}"
+        _found=false
+        for _o in "${RAID_OPTS[@]}"; do [[ "$_o" == "$RAID_LEVEL" ]] && _found=true && break; done
+        [[ "$_found" == true ]] && break
+        warn "Nível inválido para ${N} disco(s). Opções: ${RAID_OPTS[*]}"
+    done
+fi
 
 # A interface é a que o usuário selecionou explicitamente — sem remapeamento
 # automático por prefixo de IP (mudava a interface de forma silenciosa).
@@ -375,7 +385,9 @@ printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "Unidade:"         "${
 printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "Admin:"           "${ADMIN_USER}"
 printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "Senha Samba:"     "$(printf '*%.0s' {1..${#SAMBA_PASS}})"
 printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "Senha Painel:"    "$(printf '*%.0s' {1..${#PANEL_PASS}})"
-printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "RAID ${RAID_LEVEL}:" "$(IFS=', '; echo "${RAID_DISKS[*]}")"
+_RAID_LABEL="RAID ${RAID_LEVEL}:"
+[[ "$RAID_LEVEL" -eq 0 ]] && _RAID_LABEL="Disco único (SEM RAID):"
+printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "$_RAID_LABEL" "$(IFS=', '; echo "${RAID_DISKS[*]}")"
 echo -e "${CYAN}  ╠══════════════════════════════════════════════════════╣${NC}"
 echo -e "${CYAN}  ║${NC}  ${RED}⚠  TODOS OS DADOS NOS DISCOS SERÃO APAGADOS!${NC}       ${CYAN}║${NC}"
 echo -e "${CYAN}  ╚══════════════════════════════════════════════════════╝${NC}"

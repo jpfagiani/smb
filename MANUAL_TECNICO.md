@@ -132,7 +132,8 @@ network_ranges:               # redes com acesso ao servidor (firewall)
                               #   precisam ser liberadas explicitamente)
 
 raid:
-  level:   5                  # nível do RAID
+  level:   5                  # nível do RAID (0 = modo disco único, SEM mdadm:
+                              # o XFS vai direto no disco; sem tolerância a falhas)
   mount:   /mnt/raid          # ponto de montagem
   device:  /dev/md0           # dispositivo do array
   devices:                    # discos-membros por caminho ESTÁVEL (/dev/disk/by-id):

@@ -150,6 +150,16 @@ def saude() -> dict:
     md = array_device()
     resultado = {'array': None, 'discos': [], 'growfs_pendente': os.path.exists(FLAG)}
     if not md:
+        # Modo disco único (instalação sem RAID): reporta o SMART do
+        # disco que sustenta o ponto de montagem de dados
+        r = sh(['findmnt', '-n', '-o', 'SOURCE', MOUNT])
+        dev = r.stdout.strip()
+        if dev.startswith('/dev/'):
+            disco = base_disk(dev)
+            resultado['modo'] = 'disco_unico'
+            info = {'dev': disco, 'papel': 'disco único (sem RAID)'}
+            info.update(smart_disco(disco))
+            resultado['discos'].append(info)
         return resultado
     det = detalhe_array(md)
 
@@ -220,7 +230,8 @@ def add_spare(dev: str) -> None:
     validar_candidato(dev)
     md = array_device()
     if not md:
-        print('Nenhum array RAID encontrado.', file=sys.stderr)
+        print('Nenhum array RAID encontrado — servidor em modo disco único. '
+              'Para ter RAID, reinstale o armazenamento com 2+ discos.', file=sys.stderr)
         sys.exit(1)
     limpar_disco(dev)
     r = sh(['mdadm', '--manage', md, '--add', dev])
@@ -235,7 +246,8 @@ def expandir(dev: str) -> None:
     validar_candidato(dev)
     md = array_device()
     if not md:
-        print('Nenhum array RAID encontrado.', file=sys.stderr)
+        print('Nenhum array RAID encontrado — servidor em modo disco único. '
+              'Para ter RAID, reinstale o armazenamento com 2+ discos.', file=sys.stderr)
         sys.exit(1)
     det = detalhe_array(md)
     if 'Reshape Status' in det:

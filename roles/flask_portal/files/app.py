@@ -1871,6 +1871,41 @@ RAID_T = BASE_T.replace("__BODY__", """
     </table>
   </div>
 </div>
+{% elif saude and saude.modo == 'disco_unico' %}
+<div class="card">
+  <div class="card-header"><h3>❤️ Disco de dados — modo disco único</h3></div>
+  <div class="card-body">
+    <p style="font-size:.8rem;margin-bottom:.6rem">
+      <span class="badge badge-warn">Sem RAID</span>
+      <span class="text-muted" style="font-size:.78rem">
+        Uma falha deste disco perde os dados — mantenha os backups em dia.
+        Para ganhar tolerância a falhas, instale mais discos e reinstale o
+        armazenamento com RAID.
+      </span>
+    </p>
+    <table>
+      <thead><tr><th>Disco</th><th>Papel</th><th>SMART</th><th>Temp</th><th>Horas ligado</th><th>Setores realocados</th><th>Pendentes</th></tr></thead>
+      <tbody>
+      {% for d in saude.discos %}
+      <tr>
+        <td style="font-family:var(--mono);font-size:.78rem">{{ d.dev }}</td>
+        <td style="font-size:.78rem">{{ d.papel }}</td>
+        <td>
+          {% if d.smart == 'ok' %}<span class="badge badge-ok">OK</span>
+          {% elif d.smart == 'atencao' %}<span class="badge badge-warn">Atenção</span>
+          {% elif d.smart == 'falha' %}<span class="badge badge-err">FALHA</span>
+          {% else %}<span class="badge badge-info">—</span>{% endif %}
+        </td>
+        <td style="font-size:.78rem">{{ d.temp ~ '°C' if d.temp is not none else '—' }}</td>
+        <td style="font-size:.78rem">{{ d.horas if d.horas is not none else '—' }}</td>
+        <td style="font-size:.78rem">{{ d.realocados if d.realocados is not none else '—' }}</td>
+        <td style="font-size:.78rem">{{ d.pendentes if d.pendentes is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
 {% endif %}
 
 {% if candidatos %}

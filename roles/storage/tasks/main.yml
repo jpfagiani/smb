@@ -41,6 +41,12 @@
       scripts/raid_ids.sh e cole a saída no group_vars/all.yml.
       Nenhuma alteração foi feita.
 
+# raid.level == 0 → MODO DISCO ÚNICO: sem mdadm; o filesystem vai
+# direto no disco. dados_dev é o dispositivo que recebe o XFS.
+- name: Definir dispositivo de dados (array ou disco único)
+  ansible.builtin.set_fact:
+    dados_dev: "{{ raid.device if (raid.level | int) != 0 else (raid_devs_reais.stdout_lines | first) }}"
+
 - name: Tentar aproveitar RAID existente (proteção de dados)
   ansible.builtin.shell: |
     if ! findmnt -n {{ raid.mount }} >/dev/null 2>&1; then
@@ -89,19 +95,19 @@
       {{ raid.devices | join(' ') }}
   args:
     creates: "{{ raid.device }}"
-  when: raid_montado.rc != 0
+  when: raid_montado.rc != 0 and (raid.level | int) != 0
   register: raid_created
 
 - name: Aguardar dispositivo RAID ficar disponível
   ansible.builtin.wait_for:
     path: "{{ raid.device }}"
     timeout: 60
-  when: raid_montado.rc != 0
+  when: raid_montado.rc != 0 and (raid.level | int) != 0
 
 # Em produção o array pode ter outro nome (ex.: /dev/md127) — usa o
 # dispositivo realmente montado; na instalação limpa, o raid.device.
 - name: Determinar dispositivo real do RAID
-  ansible.builtin.shell: findmnt -n -o SOURCE {{ raid.mount }} 2>/dev/null || echo {{ raid.device }}
+  ansible.builtin.shell: findmnt -n -o SOURCE {{ raid.mount }} 2>/dev/null || echo {{ dados_dev }}
   register: raid_dev_real
   changed_when: false
 
@@ -115,25 +121,27 @@
     mdadm --detail --scan > /etc/mdadm/mdadm.conf
     echo "MAILADDR root" >> /etc/mdadm/mdadm.conf
   changed_when: true
+  when: (raid.level | int) != 0
 
 - name: Atualizar initramfs
   ansible.builtin.command: update-initramfs -u -k all
   changed_when: true
+  when: (raid.level | int) != 0
 
 # Formata SEMPRE na instalação limpa (array recém-criado pode exibir um
 # filesystem fantasma da instalação anterior — ver comentário no topo).
 # Com o RAID montado (produção) esta task nunca roda.
-- name: Formatar RAID com XFS (instalação limpa)
+- name: Formatar dispositivo de dados com XFS (instalação limpa)
   ansible.builtin.shell: |
     {% set n = raid.devices | length %}
     {% if raid.level == 5 %}
-    mkfs.xfs -f -L SAMBA_DATA -d su=512k,sw={{ n - 1 }} {{ raid.device }}
+    mkfs.xfs -f -L SAMBA_DATA -d su=512k,sw={{ n - 1 }} {{ dados_dev }}
     {% elif raid.level == 6 %}
-    mkfs.xfs -f -L SAMBA_DATA -d su=512k,sw={{ n - 2 }} {{ raid.device }}
+    mkfs.xfs -f -L SAMBA_DATA -d su=512k,sw={{ n - 2 }} {{ dados_dev }}
     {% elif raid.level == 10 %}
-    mkfs.xfs -f -L SAMBA_DATA -d su=512k,sw={{ (n / 2) | int }} {{ raid.device }}
+    mkfs.xfs -f -L SAMBA_DATA -d su=512k,sw={{ (n / 2) | int }} {{ dados_dev }}
     {% else %}
-    mkfs.xfs -f -L SAMBA_DATA {{ raid.device }}
+    mkfs.xfs -f -L SAMBA_DATA {{ dados_dev }}
     {% endif %}
   when: raid_montado.rc != 0
   register: xfs_format
@@ -189,6 +197,8 @@
     content: |
       #!/bin/bash
       RAID="{{ raid.device }}"
+      # Modo disco único (sem RAID): nada a monitorar — sai sem alertas falsos
+      [ -b "$RAID" ] || exit 0
       STATE=$(mdadm --detail "$RAID" 2>/dev/null | awk '/State :/{print $3}')
       FAILED=$(mdadm --detail "$RAID" 2>/dev/null | awk '/Failed Devices/{print $4}')
       FAILED=${FAILED:-0}

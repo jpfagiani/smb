@@ -25,7 +25,7 @@ Um servidor de arquivos completo para a rede local da unidade, com:
 
 ### 2.1 O que você precisa
 
-- Máquina com **2 ou mais discos além do disco do sistema** (para o RAID);
+- Máquina com **1 ou mais discos além do disco do sistema** — com 2+ o instalador monta RAID (recomendado); com apenas 1, instala em **modo disco único**, sem tolerância a falhas (⚠️ backups tornam-se ainda mais importantes);
 - **Debian 13** instalado no disco do sistema (instalação padrão, sem interface gráfica);
 - Acesso à internet durante a instalação (para baixar os pacotes);
 - Os IPs da sua rede em mãos: IP fixo para o servidor, gateway, DNS e NTP.
@@ -66,7 +66,7 @@ O instalador é interativo. O que cada pergunta significa:
 | **Senha padrão dos usuários Samba** | Senha inicial de todos os usuários (cada um troca depois no portal) |
 | **Senha do painel web** | Reservada ao painel legado — anote mesmo assim |
 | **Discos para o RAID** | Os números dos discos de dados (⚠️ nunca o disco do sistema — o instalador o marca com `[SO]`) |
-| **Nível de RAID** | `1` = espelho (2 discos) · `5` = paridade (3+, tolera 1 falha) · `6` = tolera 2 falhas (4+) · `10` = espelho+velocidade (4+ pares) |
+| **Nível de RAID** | `1` = espelho (2 discos) · `5` = paridade (3+, tolera 1 falha) · `6` = tolera 2 falhas (4+) · `10` = espelho+velocidade (4+ pares). Com **1 disco só**, o instalador pula esta pergunta e usa o modo disco único (sem RAID) |
 
 Ao confirmar, a instalação roda sozinha (10–20 min). O RAID continua sincronizando em segundo plano por algumas horas depois — o servidor já funciona normalmente nesse período.
 
