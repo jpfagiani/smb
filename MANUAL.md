@@ -178,6 +178,14 @@ ansible-playbook -i inventory/hosts.ini site.yml --diff
 
 É seguro re-executar quantas vezes quiser: o playbook **nunca** apaga o RAID em uso nem reseta senhas já alteradas.
 
+### Passar de disco único para RAID (depois de instalado)
+
+Dá para fazer sem perder os dados. O caminho simples: **Backups** (portal) →
+adicione o disco novo → reinstale com `bootstrap.sh` escolhendo 2+ discos →
+restaure o backup. Há também uma conversão avançada sem reinstalar (RAID 1 em
+funcionamento) — veja o [MANUAL_TECNICO.md](MANUAL_TECNICO.md) seção 5.6.
+Faça backup antes, de qualquer forma.
+
 ### Adicionar um disco novo ao RAID
 
 Plugue o disco → portal → **RAID / Discos** → "Discos novos detectados" → escolha Hot spare ou Expandir. Depois de expandir, atualize a lista de discos do arquivo de configuração:

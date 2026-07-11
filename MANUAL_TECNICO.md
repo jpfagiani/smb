@@ -303,6 +303,57 @@ sudo /usr/local/bin/cdpni-raid concluir-growfs      # roda o xfs_growfs quando o
 Proteções embutidas: recusa o disco do S.O., membros do RAID, discos com
 partições montadas e dispositivos sem mídia (leitores de cartão vazios = 0 bytes).
 
+### 5.6 Migrar de disco único para RAID (sem reinstalar)
+
+O playbook **não** converte automaticamente (mudar `raid.devices` de 1 para
+2 discos não apaga o disco em uso — a trava "montado = intocável" protege).
+Há dois caminhos:
+
+**Caminho A — backup e reinstalar (recomendado, mais simples):**
+
+1. Portal → Backups → grave um backup completo em outra máquina (rede SMB);
+2. Adicione o(s) disco(s) novo(s) à máquina;
+3. `bash bootstrap.sh`, selecione 2+ discos e escolha o nível de RAID;
+4. Restaure os dados do backup para `/mnt/raid/shares`.
+
+**Caminho B — conversão in loco para RAID 1 (avançado, sem reinstalar):**
+
+Preserva os dados migrando-os para um array degradado e depois espelhando
+de volta. Requer o disco novo (ex.: `/dev/sdb`) além do atual (ex.: `/dev/sdf`).
+
+```bash
+systemctl stop smbd nmbd cdpni-portal          # libera o /mnt/raid
+
+# 1. Cria um RAID 1 DEGRADADO só com o disco NOVO (a 2ª perna fica "missing")
+mdadm --create /dev/md0 --level=1 --raid-devices=2 /dev/sdb missing --metadata=1.2
+
+# 2. Formata o array e copia os dados do disco atual para ele
+mkfs.xfs -f -L SAMBA_NEW /dev/md0
+mkdir -p /mnt/raid_new && mount /dev/md0 /mnt/raid_new
+rsync -aHAX --info=progress2 /mnt/raid/ /mnt/raid_new/
+
+# 3. Troca: desmonta os dois, remonta o array em /mnt/raid
+umount /mnt/raid_new /mnt/raid
+xfs_admin -L SAMBA_DATA /dev/md0               # renomeia p/ o label padrão
+mount /dev/md0 /mnt/raid
+
+# 4. Adiciona o disco ANTIGO ao array (APAGA sdf e espelha os dados nele)
+mdadm --manage /dev/md0 --add /dev/sdf         # sincroniza — acompanhe: cat /proc/mdstat
+
+# 5. Persiste a definição do array e o fstab
+mdadm --detail --scan > /etc/mdadm/mdadm.conf && echo "MAILADDR root" >> /etc/mdadm/mdadm.conf
+update-initramfs -u
+UUID=$(blkid -s UUID -o value /dev/md0)
+sed -i "\|/mnt/raid|d" /etc/fstab
+echo "UUID=$UUID  /mnt/raid  xfs  defaults,noatime,nodiratime,allocsize=64m,largeio  0  2" >> /etc/fstab
+
+systemctl start smbd nmbd cdpni-portal
+```
+
+Depois atualize o `group_vars/all.yml`: `raid.level: 1` e `raid.devices` com
+os dois discos por by-id (rode `scripts/raid_ids.sh`). Faça backup antes —
+o passo 4 apaga o disco antigo.
+
 ---
 
 ## 6. Samba
