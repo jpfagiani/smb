@@ -2563,10 +2563,29 @@ def lixeira_safe(rel: str) -> Path:
         abort(403)
     return alvo
 
+def _lx_iterdir(p: Path) -> list:
+    """Lista o conteúdo de uma pasta sem NUNCA propagar erro de permissão.
+
+    As lixeiras pessoais são 0700 de cada dono; se a ACL do portal tiver
+    sido mascarada (ex.: o role samba recria a pasta com chmod), a leitura
+    falharia — a página inteira daria 500. Aqui a pasta ilegível é apenas
+    pulada.
+    """
+    try:
+        return list(p.iterdir())
+    except OSError:
+        return []
+
+def _lx_is_dir(p: Path) -> bool:
+    try:
+        return p.is_dir()
+    except OSError:
+        return False
+
 def _lx_info_dir(p: Path) -> tuple:
     """(bytes, n_arquivos, ctime mais recente) de uma pasta da lixeira."""
     total, n, mt = 0, 0, 0.0
-    for raiz, _d, arqs in os.walk(p):
+    for raiz, _d, arqs in os.walk(p):   # os.walk ignora erros por padrão
         for a in arqs:
             try:
                 st = os.stat(os.path.join(raiz, a))
@@ -2583,7 +2602,7 @@ def _lx_info_dir(p: Path) -> tuple:
     return total, n, mt
 
 def _lx_item(ent: Path, usuario: str, share: str, rel: str, restauravel: bool) -> dict:
-    if ent.is_dir():
+    if _lx_is_dir(ent):
         total, n, mt = _lx_info_dir(ent)
         tipo, nome = 'pasta', ent.name + '/'
     else:
@@ -2617,12 +2636,12 @@ def lixeira_listar(rel: str = '') -> list[dict]:
     if not rel:
         if not base.is_dir():
             return itens
-        for udir in sorted(base.iterdir()):
-            if not udir.is_dir():
+        for udir in sorted(_lx_iterdir(base)):
+            if not _lx_is_dir(udir):
                 continue
-            for ent in sorted(udir.iterdir(), key=lambda e: e.name.lower()):
-                if ent.is_dir() and ent.name in shares_validos:
-                    for sub in sorted(ent.iterdir(), key=lambda e: (e.is_file(), e.name.lower())):
+            for ent in sorted(_lx_iterdir(udir), key=lambda e: e.name.lower()):
+                if _lx_is_dir(ent) and ent.name in shares_validos:
+                    for sub in sorted(_lx_iterdir(ent), key=lambda e: (not _lx_is_dir(e), e.name.lower())):
                         itens.append(_lx_item(sub, udir.name, ent.name,
                                               f'{udir.name}/{ent.name}/{sub.name}', True))
                 else:
@@ -2635,7 +2654,7 @@ def lixeira_listar(rel: str = '') -> list[dict]:
         comps = rel.split('/')
         usuario = comps[0]
         share = comps[1] if len(comps) > 1 and comps[1] in shares_validos else '—'
-        for ent in sorted(alvo.iterdir(), key=lambda e: (e.is_file(), e.name.lower())):
+        for ent in sorted(_lx_iterdir(alvo), key=lambda e: (not _lx_is_dir(e), e.name.lower())):
             itens.append(_lx_item(ent, usuario, share,
                                   f'{rel}/{ent.name}', share != '—'))
     return itens

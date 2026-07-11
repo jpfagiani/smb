@@ -144,6 +144,16 @@
     mode: "0700"
     owner: "{{ server.admin_user }}"
 
+# O chmod 0700 acima mascara a ACL de leitura do portal; reaplica aqui,
+# no próprio role samba, para que rodar SÓ a tag samba (ex.: change-ip.sh)
+# não deixe a página Lixeira do portal sem acesso (erro 500).
+- name: Garantir leitura do portal na lixeira (ACL, sobrevive ao chmod 0700)
+  ansible.builtin.shell: |
+    setfacl -R  -m u:{{ portal.user }}:rx {{ raid.mount }}/recycle
+    setfacl -R -d -m u:{{ portal.user }}:rx {{ raid.mount }}/recycle
+  changed_when: false
+  ignore_errors: true
+
 # ── smb.conf ──────────────────────────────────────────────────────────────────
 
 - name: Fazer backup do smb.conf original
