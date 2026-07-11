@@ -71,8 +71,11 @@
     # em /var/log/samba/audit.log (lido pela página Logs do portal).
     # Samba >= 4.15 usa syscalls *at: open/rename/unlink viraram openat etc.
     full_audit:prefix    = %u|%I|%S
-    full_audit:success   = connect disconnect openat renameat unlinkat mkdirat
-    full_audit:failure   = connect openat
+    # Só operações que representam ACESSO REAL a arquivos — sem connect/
+    # disconnect (ruído de enumeração de shares pelo Windows). O portal
+    # ainda filtra aberturas de pastas (navegação do Explorer).
+    full_audit:success   = openat renameat unlinkat mkdirat
+    full_audit:failure   = openat
     full_audit:facility  = local5
     full_audit:priority  = notice
 

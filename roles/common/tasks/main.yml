@@ -45,6 +45,9 @@
       - ifupdown
       # python3-yaml é usado pelo change-ip.sh (parse do all.yml)
       - python3-yaml
+      # nginx instalado cedo (não só no role do portal, que é o último):
+      # garante a presença do pacote logo no início da instalação
+      - nginx
     state: present
 
 - name: Configurar postfix (local only)

@@ -409,15 +409,22 @@ def get_samba_logs(lines: int = 100) -> str:
         pass
     return '\n\n'.join(result) if result else '(sem logs disponíveis)'
 
-def get_audit_log(lines: int = 200) -> list[dict]:
-    """Eventos de acesso a arquivos (full_audit → rsyslog local5 → audit.log)."""
+def get_audit_log(lines: int = 400) -> list[dict]:
+    """Acessos a ARQUIVOS (full_audit → rsyslog local5 → audit.log).
+
+    Mostra só o que interessa: abertura de arquivos, renomear, excluir e
+    criar pasta. Filtra o ruído do Windows — aberturas de PASTAS (navegação
+    do Explorer, que abre o diretório várias vezes por segundo para listar
+    ícones) e repetições idênticas no mesmo instante.
+    """
     arquivo = '/var/log/samba/audit.log'
     rc, out, _ = run(['sudo', 'tail', f'-n{lines}', arquivo])
     if rc != 0 or not out:
         return []
     ops = {'openat': 'Abriu', 'renameat': 'Renomeou', 'unlinkat': 'Excluiu',
-           'mkdirat': 'Criou pasta', 'connect': 'Conectou', 'disconnect': 'Desconectou'}
+           'mkdirat': 'Criou pasta'}
     eventos = []
+    visto = None
     for linha in reversed(out.splitlines()):
         if 'smbd_audit:' not in linha:
             continue
@@ -425,21 +432,32 @@ def get_audit_log(lines: int = 200) -> list[dict]:
         partes = [p.strip() for p in resto.strip().split('|')]
         if len(partes) < 5:
             continue
+        op = partes[3]
+        if op not in ops:          # ignora connect/disconnect e outros
+            continue
         pre_campos = pre.split()
         if pre_campos and 'T' in pre_campos[0]:
             ts = pre_campos[0][:19].replace('T', ' ')
         else:
             ts = ' '.join(pre_campos[:3])
-        op = partes[3]
         if op == 'renameat' and len(partes) > 6:
             alvo = ' → '.join(partes[5:])
         elif len(partes) > 5:
             alvo = partes[-1]
         else:
             alvo = ''
+        # "Abriu" numa PASTA = navegação do Explorer (ruído). Só mostra
+        # abertura quando o alvo é um arquivo de verdade (ou já não existe,
+        # ex.: foi aberto e depois movido/apagado).
+        if op == 'openat' and alvo and os.path.isdir(alvo):
+            continue
+        chave = (ts, partes[0], partes[1], partes[2], op, alvo)
+        if chave == visto:         # colapsa repetições idênticas no mesmo segundo
+            continue
+        visto = chave
         eventos.append({
             'hora': ts, 'usuario': partes[0], 'ip': partes[1],
-            'share': partes[2], 'op': ops.get(op, op),
+            'share': partes[2], 'op': ops[op],
             'ok': partes[4] == 'ok', 'alvo': alvo,
         })
     return eventos
