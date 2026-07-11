@@ -193,6 +193,10 @@ valid_ip() {
 
 valid_pass() {
     local p="$1"
+    # Rejeita caracteres de controle: com read -rsp, apertar setas/Tab/teclas
+    # especiais injeta sequências de escape (ESC = 0x1b) que quebram o YAML
+    # gerado ("unacceptable character #x001b").
+    [[ "$p" == *[[:cntrl:]]* ]] && return 2
     [[ ${#p} -ge 8 ]] || return 1
     [[ "$p" =~ [A-Z] ]] || return 1
     [[ "$p" =~ [a-z] ]] || return 1
@@ -284,7 +288,11 @@ echo -e "  ${DIM}Requisitos: mínimo 8 caracteres, letras maiúsculas, minúscul
 while true; do
     ask "Senha padrão dos usuários Samba:"
     read -rsp "  > " SAMBA_PASS; echo ""
-    if ! valid_pass "$SAMBA_PASS"; then
+    valid_pass "$SAMBA_PASS"; _rc=$?
+    if [[ $_rc -eq 2 ]]; then
+        warn "Senha com caracteres inválidos — NÃO use setas/Tab/teclas especiais ao digitar. Tente de novo."
+        continue
+    elif [[ $_rc -ne 0 ]]; then
         warn "Senha fraca. Use ao menos 8 chars com maiúsc., minúsc. e número."
         continue
     fi
@@ -300,7 +308,11 @@ echo ""
 while true; do
     ask "Senha do painel web (admin) [porta 8443]:"
     read -rsp "  > " PANEL_PASS; echo ""
-    if ! valid_pass "$PANEL_PASS"; then
+    valid_pass "$PANEL_PASS"; _rc=$?
+    if [[ $_rc -eq 2 ]]; then
+        warn "Senha com caracteres inválidos — NÃO use setas/Tab/teclas especiais ao digitar. Tente de novo."
+        continue
+    elif [[ $_rc -ne 0 ]]; then
         warn "Senha fraca. Use ao menos 8 chars com maiúsc., minúsc. e número."
         continue
     fi
@@ -438,9 +450,11 @@ _RANGES_YAML=""
 for _r in "${_REDES_PADRAO[@]}"; do _RANGES_YAML+="  - \"${_r}\""$'\n'; done
 [[ "$_COBERTA" == "nao" ]] && _RANGES_YAML+="  - \"${_NET_ESCOLHIDA}\""$'\n'
 
-# Remove aspas duplas do nome para não quebrar o YAML
-ORG_NOME="${ORG_NOME//\"/}"
-ORG_SIGLA="${ORG_SIGLA//\"/}"
+# Remove aspas duplas (quebrariam o YAML) e caracteres de controle
+# (defesa contra colagem/teclas especiais nos campos de texto livre)
+_strip_ctrl() { printf '%s' "$1" | tr -d '\000-\037'; }
+ORG_NOME="$(_strip_ctrl "${ORG_NOME//\"/}")"
+ORG_SIGLA="$(_strip_ctrl "${ORG_SIGLA//\"/}")"
 
 cat > "${SCRIPT_DIR}/group_vars/all.yml" << YAML
 # Gerado por bootstrap.sh em $(date)
