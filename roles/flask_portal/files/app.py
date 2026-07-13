@@ -1754,6 +1754,37 @@ function confirmDelShare(btn) {
 </script>
 """)
 
+# mapeamento share → grupo correto (casos onde nome != grupo)
+SHARE_GROUP_MAP = {
+    'Chefia_Turno_I':    'grp_chefia1',
+    'Chefia_Turno_II':   'grp_chefia2',
+    'Chefia_Turno_III':  'grp_chefia3',
+    'Chefia_Turno_IV':   'grp_chefia4',
+    'Conexao_Familiar':  'grp_conexao',
+    'Infraestrutura':    'grp_infra',
+    'Nucleo_de_Pessoal': 'grp_npessoal',
+    'Portaria_Turno_I':  'grp_portaria1',
+    'Portaria_Turno_II': 'grp_portaria2',
+    'Portaria_Turno_III':'grp_portaria3',
+    'Portaria_Turno_IV': 'grp_portaria4',
+    'Rol_de_Visitas':    'grp_rol',
+    'Diretoria_Geral':   'grp_dg',
+}
+
+def _share_group(name: str, existente: str = '') -> str:
+    """Grupo dono do share: mapeamento fixo > valor existente > deriva do nome."""
+    return SHARE_GROUP_MAP.get(name) or existente.lstrip('+').strip() \
+        or ('grp_' + name.lower())
+
+def _default_valid_users(name: str, force_group: str = '') -> str:
+    """Acesso padrão de um share sem 'valid users' informado: só o grupo
+    dele + admins. Sem essa linha o Samba aceitaria QUALQUER usuário
+    autenticado. Garante que o grupo exista (senão o force group
+    derrubaria a conexão de todo mundo)."""
+    grp = _share_group(name, force_group)
+    run(['sudo', '/usr/local/bin/cdpni-groupadd', '-f', grp])
+    return f'@{grp} ' + ' '.join(sorted(ADMIN_USERS))
+
 def _rebuild_smb_conf(shares: list[dict]) -> str:
     try:
         raw = open(SMB_CONF).read()
@@ -1773,26 +1804,10 @@ def _rebuild_smb_conf(shares: list[dict]) -> str:
         elif not in_managed:
             lines_out.append(line)
     result = '\n'.join(lines_out).rstrip() + '\n'
-    # mapeamento share → grupo correto (casos onde nome != grupo)
-    SHARE_GROUP_MAP = {
-        'Chefia_Turno_I':    'grp_chefia1',
-        'Chefia_Turno_II':   'grp_chefia2',
-        'Chefia_Turno_III':  'grp_chefia3',
-        'Chefia_Turno_IV':   'grp_chefia4',
-        'Conexao_Familiar':  'grp_conexao',
-        'Infraestrutura':    'grp_infra',
-        'Nucleo_de_Pessoal': 'grp_npessoal',
-        'Portaria_Turno_I':  'grp_portaria1',
-        'Portaria_Turno_II': 'grp_portaria2',
-        'Portaria_Turno_III':'grp_portaria3',
-        'Portaria_Turno_IV': 'grp_portaria4',
-        'Rol_de_Visitas':    'grp_rol',
-        'Diretoria_Geral':   'grp_dg',
-    }
     # campos escritos explicitamente — os demais são preservados como estão
     EXPLICIT = {'name', 'comment', 'path', 'browseable', 'read_only', 'writable',
                 'valid_users', 'create_mask', 'directory_mask', 'force_group',
-                'force_create_mode', 'force_directory_mode'}
+                'force_create_mode', 'force_directory_mode', 'guest_ok'}
     for s in shares:
         result += f'\n[{s["name"]}]\n'
         if s.get('comment'):
@@ -1800,10 +1815,15 @@ def _rebuild_smb_conf(shares: list[dict]) -> str:
         result += f'   path = {s["path"]}\n'
         result += f'   browseable = {s.get("browseable","yes")}\n'
         result += f'   read only = {s.get("read_only","no")}\n'
+        fg = _share_group(s['name'], s.get('force_group', ''))
+        guest = s.get('guest_ok', 'no')
+        result += f'   guest ok = {guest}\n'
         if s.get('valid_users'):
             result += f'   valid users = {s["valid_users"]}\n'
-        # force group: mapeamento fixo > valor existente > deriva do nome
-        fg = SHARE_GROUP_MAP.get(s['name']) or s.get('force_group') or ('grp_' + s['name'].lower())
+        elif guest != 'yes':
+            # rede de segurança: share sem 'valid users' aceitaria qualquer
+            # usuário autenticado — fecha no grupo dele + admins
+            result += f'   valid users = @{fg} {" ".join(sorted(ADMIN_USERS))}\n'
         result += f'   force group = {fg}\n'
         result += f'   create mask = {s.get("create_mask","0664")}\n'
         result += f'   directory mask = {s.get("directory_mask","0775")}\n'
@@ -1841,10 +1861,18 @@ def share_create():
     if not name or not path:
         flash('Nome e caminho são obrigatórios', 'error')
         return redirect(url_for('shares_page'))
+    # sem 'valid users' o share ficaria aberto a qualquer usuário
+    # autenticado — o padrão é fechado: grupo do share + admins
+    if not valid_users:
+        valid_users = _default_valid_users(name)
+    else:
+        run(['sudo', '/usr/local/bin/cdpni-groupadd', '-f', _share_group(name)])
     if create_dir and not os.path.exists(path):
         run(['sudo', 'mkdir', '-p', path])
-        run(['sudo', 'chmod', '0775', path])
-        run(['sudo', 'chown', 'root:sambashare', path])
+        # mesmo padrão dos shares do playbook: 0777 + grupo do share
+        # (quem barra estranhos é o valid users, na camada SMB)
+        run(['sudo', 'chmod', '0777', path])
+        run(['sudo', 'chown', f'root:{_share_group(name)}', path])
     shares = parse_smb_shares()
     if any(s['name'] == name for s in shares):
         flash(f'Share "{name}" já existe', 'error')
@@ -1879,6 +1907,10 @@ def share_edit():
     for s in shares:
         if s['name'] == orig_name:
             found = True
+            # campo vazio não pode abrir o share para todo mundo —
+            # aplica o padrão fechado (grupo do share + admins)
+            if not valid_users and s.get('guest_ok') != 'yes':
+                valid_users = _default_valid_users(name, s.get('force_group', ''))
             s.update({'name': name, 'path': path, 'comment': comment,
                       'valid_users': valid_users, 'read_only': read_only, 'browseable': browseable})
         updated.append(s)
