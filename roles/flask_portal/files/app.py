@@ -461,6 +461,10 @@ def get_audit_log(lines: int = 400) -> list[dict]:
         if op == 'openat' and extras and extras[0] in ('r', 'w'):
             modo = extras[0]
             extras = extras[1:]
+        # normaliza "/pasta/.", "/pasta/.." e "pasta/" — o Explorer gera
+        # essas variações e elas impediriam o colapso e a deduplicação
+        extras = [os.path.normpath(x) if x.startswith('/') else x
+                  for x in extras]
         if op == 'renameat' and len(extras) >= 2:
             alvo = ' → '.join(extras)
         else:
@@ -479,7 +483,10 @@ def get_audit_log(lines: int = 400) -> list[dict]:
         d = os.path.dirname(e['alvo'].split(' → ')[-1])
         while len(d) > 1:
             pais.add(d)
-            d = os.path.dirname(d)
+            acima = os.path.dirname(d)
+            if acima == d:         # "//" é pai de si mesmo (POSIX) — sem isso
+                break              # o loop nunca termina e o worker trava
+            d = acima
     dirs = {e['alvo'] for e in brutos if e['op'] == 'mkdirat'}
     for e in brutos:
         a = e['alvo']
