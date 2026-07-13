@@ -372,7 +372,10 @@ o passo 4 apaga o disco antigo.
    #             └─ 2ª camada de defesa (a 1ª é o nftables): só estas faixas conectam
 
    # ── Lixeira ────────────────────────────────────────────
-   vfs objects = recycle full_audit    # plugins: lixeira + auditoria
+   vfs objects = full_audit recycle    # plugins: auditoria + lixeira
+   #             └─ auditoria PRIMEIRO: o recycle converte exclusão em
+   #                rename para a lixeira; se viesse antes, o full_audit
+   #                nunca veria o unlinkat e "Excluiu" sumiria do log
    recycle:repository = /mnt/raid/recycle/%U/%S
    #                    └─ %U = usuário, %S = share → a lixeira sabe DE ONDE veio
    #                       cada arquivo (é o que permite o botão Restaurar)

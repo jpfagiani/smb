@@ -55,7 +55,12 @@
 
     # Lixeira global — organizada por usuário/share para permitir a
     # restauração ao local de origem (página Lixeira do portal)
-    vfs objects          = recycle full_audit
+    # full_audit ANTES do recycle: os módulos são chamados na ordem
+    # listada, e o recycle transforma exclusão em rename para a lixeira —
+    # se ele viesse primeiro, o full_audit nunca veria o unlinkat e as
+    # exclusões sumiriam do log. Nesta ordem o rename interno do recycle
+    # também não polui o log (SMB_VFS_NEXT pula os módulos acima).
+    vfs objects          = full_audit recycle
     recycle:repository   = {{ raid.mount }}/recycle/%U/%S
     recycle:keeptree     = yes
     # 0770 (não o padrão 0700): com bits de grupo a máscara de ACL não
