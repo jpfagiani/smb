@@ -1657,7 +1657,7 @@ SHARES_T = BASE_T.replace("__BODY__", """
     <tr>
       <td><strong>{{ s.name }}</strong></td>
       <td class="text-muted nowrap" style="font-family:var(--mono);font-size:.74rem">{{ s.path }}</td>
-      <td class="text-muted" style="font-size:.74rem">{{ s.valid_users or '—' }}</td>
+      <td class="text-muted" style="font-size:.74rem">{% if s.get('guest_ok') == 'yes' %}<span class="badge badge-warn">Público (sem senha)</span>{% else %}{{ s.valid_users or '—' }}{% endif %}</td>
       <td><span class="badge {{ 'badge-warn' if s.read_only == 'yes' else 'badge-ok' }}">{{ 'Sim' if s.read_only == 'yes' else 'Não' }}</span></td>
       <td class="text-right nowrap">
         <button class="btn btn-xs"
@@ -1667,6 +1667,7 @@ SHARES_T = BASE_T.replace("__BODY__", """
           data-users="{{ s.valid_users|e }}"
           data-ro="{{ s.read_only|e }}"
           data-browse="{{ s.browseable|e }}"
+          data-guest="{{ s.get('guest_ok', 'no')|e }}"
           onclick="openEditShare(this)">Editar</button>
         <button class="btn btn-xs btn-danger"
           data-name="{{ s.name|e }}"
@@ -1686,7 +1687,12 @@ SHARES_T = BASE_T.replace("__BODY__", """
       <small class="text-muted">Preenchido automaticamente — edite se necessário</small>
     </div>
     <div class="form-group"><label>Comentário</label><input type="text" name="comment"></div>
-    <div class="form-group"><label>Usuários/grupos válidos (ex: user1 @grupo1)</label><input type="text" name="valid_users"></div>
+    <div class="form-group"><label>Tipo de acesso</label>
+      <select name="acesso" id="nsAcesso" onchange="toggleShareUsers('nsAcesso','nsUsersGrp')">
+        <option value="restrito">Restrito — só usuários/grupos autorizados</option>
+        <option value="publico">Público — toda a rede, sem senha</option>
+      </select></div>
+    <div class="form-group" id="nsUsersGrp"><label>Usuários/grupos válidos (ex: user1 @grupo1 — vazio = grupo do share + admin)</label><input type="text" name="valid_users"></div>
     <div class="form-row">
       <div class="form-group"><label>Somente leitura</label>
         <select name="read_only"><option value="no">Não</option><option value="yes">Sim</option></select></div>
@@ -1704,7 +1710,12 @@ SHARES_T = BASE_T.replace("__BODY__", """
     <div class="form-group"><label>Nome</label><input type="text" name="name" id="esName" required></div>
     <div class="form-group"><label>Caminho</label><input type="text" name="path" id="esPath" required></div>
     <div class="form-group"><label>Comentário</label><input type="text" name="comment" id="esComment"></div>
-    <div class="form-group"><label>Usuários/grupos válidos</label><input type="text" name="valid_users" id="esUsers"></div>
+    <div class="form-group"><label>Tipo de acesso</label>
+      <select name="acesso" id="esAcesso" onchange="toggleShareUsers('esAcesso','esUsersGrp')">
+        <option value="restrito">Restrito — só usuários/grupos autorizados</option>
+        <option value="publico">Público — toda a rede, sem senha</option>
+      </select></div>
+    <div class="form-group" id="esUsersGrp"><label>Usuários/grupos válidos (vazio = grupo do share + admin)</label><input type="text" name="valid_users" id="esUsers"></div>
     <div class="form-row">
       <div class="form-group"><label>Somente leitura</label>
         <select name="read_only" id="esRO"><option value="no">Não</option><option value="yes">Sim</option></select></div>
@@ -1731,6 +1742,10 @@ function closeModal(id) {
 document.querySelectorAll(".modal-bg").forEach(function(m) {
   m.addEventListener("click", function(e) { if (e.target === m) m.classList.remove("open"); });
 });
+function toggleShareUsers(selId, grpId) {
+  var sel = document.getElementById(selId), g = document.getElementById(grpId);
+  if (sel && g) g.style.display = sel.value === "publico" ? "none" : "";
+}
 function openEditShare(btn) {
   var d = btn.dataset;
   function s(id, v) { var el = document.getElementById(id); if (el) el.value = v || ""; }
@@ -1740,6 +1755,9 @@ function openEditShare(btn) {
   if (ro) ro.value = d.ro === "yes" ? "yes" : "no";
   var br = document.getElementById("esBrowse");
   if (br) br.value = d.browse === "no" ? "no" : "yes";
+  var ac = document.getElementById("esAcesso");
+  if (ac) { ac.value = d.guest === "yes" ? "publico" : "restrito"; }
+  toggleShareUsers("esAcesso", "esUsersGrp");
   var m = document.getElementById("mEditShare");
   if (m) m.classList.add("open");
 }
@@ -1854,6 +1872,7 @@ def share_create():
     name        = re.sub(r'[^\w\-]', '', request.form.get('name', '').strip())
     path        = request.form.get('path', '').strip()
     comment     = request.form.get('comment', '').strip()
+    acesso      = request.form.get('acesso', 'restrito')
     valid_users = request.form.get('valid_users', '').strip()
     read_only   = request.form.get('read_only', 'no')
     browseable  = request.form.get('browseable', 'yes')
@@ -1861,12 +1880,14 @@ def share_create():
     if not name or not path:
         flash('Nome e caminho são obrigatórios', 'error')
         return redirect(url_for('shares_page'))
-    # sem 'valid users' o share ficaria aberto a qualquer usuário
-    # autenticado — o padrão é fechado: grupo do share + admins
-    if not valid_users:
+    # o force group exige que o grupo exista, mesmo em share público
+    run(['sudo', '/usr/local/bin/cdpni-groupadd', '-f', _share_group(name)])
+    if acesso == 'publico':
+        valid_users = ''           # público (guest): sem lista de usuários
+    elif not valid_users:
+        # sem 'valid users' o share ficaria aberto a qualquer usuário
+        # autenticado — o padrão é fechado: grupo do share + admins
         valid_users = _default_valid_users(name)
-    else:
-        run(['sudo', '/usr/local/bin/cdpni-groupadd', '-f', _share_group(name)])
     if create_dir and not os.path.exists(path):
         run(['sudo', 'mkdir', '-p', path])
         # mesmo padrão dos shares do playbook: 0777 + grupo do share
@@ -1877,9 +1898,14 @@ def share_create():
     if any(s['name'] == name for s in shares):
         flash(f'Share "{name}" já existe', 'error')
         return redirect(url_for('shares_page'))
-    shares.append({'name': name, 'path': path, 'comment': comment,
-                   'valid_users': valid_users, 'read_only': read_only,
-                   'browseable': browseable, 'create_mask': '0664', 'directory_mask': '0775'})
+    novo = {'name': name, 'path': path, 'comment': comment,
+            'valid_users': valid_users, 'read_only': read_only,
+            'browseable': browseable, 'create_mask': '0664',
+            'directory_mask': '0775', 'guest_ok': 'no'}
+    if acesso == 'publico':
+        novo['guest_ok'] = 'yes'
+        novo['public'] = 'yes'
+    shares.append(novo)
     ok, err = _write_smb_conf(_rebuild_smb_conf(shares))
     if not ok:
         flash(f'Erro ao salvar smb.conf: {err}', 'error')
@@ -1895,6 +1921,7 @@ def share_edit():
     name        = re.sub(r'[^\w\-]', '', request.form.get('name', '').strip())
     path        = request.form.get('path', '').strip()
     comment     = request.form.get('comment', '').strip()
+    acesso      = request.form.get('acesso', 'restrito')
     valid_users = request.form.get('valid_users', '').strip()
     read_only   = request.form.get('read_only', 'no')
     browseable  = request.form.get('browseable', 'yes')
@@ -1907,10 +1934,17 @@ def share_edit():
     for s in shares:
         if s['name'] == orig_name:
             found = True
-            # campo vazio não pode abrir o share para todo mundo —
-            # aplica o padrão fechado (grupo do share + admins)
-            if not valid_users and s.get('guest_ok') != 'yes':
-                valid_users = _default_valid_users(name, s.get('force_group', ''))
+            if acesso == 'publico':
+                s['guest_ok'] = 'yes'
+                s['public'] = 'yes'
+                valid_users = ''   # público (guest): sem lista de usuários
+            else:
+                s['guest_ok'] = 'no'
+                s.pop('public', None)
+                # campo vazio não pode abrir o share para todo mundo —
+                # aplica o padrão fechado (grupo do share + admins)
+                if not valid_users:
+                    valid_users = _default_valid_users(name, s.get('force_group', ''))
             s.update({'name': name, 'path': path, 'comment': comment,
                       'valid_users': valid_users, 'read_only': read_only, 'browseable': browseable})
         updated.append(s)
