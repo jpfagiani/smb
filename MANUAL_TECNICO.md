@@ -382,12 +382,18 @@ o passo 4 apaga o disco antigo.
 
    # ── Auditoria ──────────────────────────────────────────
    full_audit:prefix  = %u|%I|%S       # cada evento: usuário|IP|share
-   full_audit:success = connect disconnect openat renameat unlinkat mkdirat
-   #                    └─ nomes das syscalls modernas (Samba ≥4.15 usa *at)
-   full_audit:failure = connect openat # também loga tentativas que falharam
+   full_audit:success = openat renameat unlinkat mkdirat
+   #                    └─ nomes das syscalls modernas (Samba ≥4.15 usa *at);
+   #                       sem connect/disconnect (ruído de enumeração do Windows)
+   full_audit:failure = openat         # também loga tentativas que falharam
    full_audit:facility = local5        # envia ao syslog na "facility" local5…
    # …e o rsyslog (regra /etc/rsyslog.d/49-samba-audit.conf) grava a local5 em
    # /var/log/samba/audit.log — que a página "Logs de acesso" do portal lê.
+   # O portal (get_audit_log) ainda limpa o restante do ruído: ao listar uma
+   # pasta, o Explorer abre CADA arquivo para gerar ícone/miniatura — essa
+   # rajada de leituras vira uma única linha "Abriu pasta"; exclusão recursiva
+   # vira "Excluiu pasta"; Thumbs.db/desktop.ini/~$*/Zone.Identifier são
+   # descartados; abertura com escrita aparece como "Criou/Alterou".
 
 [Recycle]                              # o share oculto da lixeira
    path = /mnt/raid/recycle

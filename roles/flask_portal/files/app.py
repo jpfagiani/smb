@@ -412,20 +412,28 @@ def get_samba_logs(lines: int = 100) -> str:
 def get_audit_log(lines: int = 400) -> list[dict]:
     """Acessos a ARQUIVOS (full_audit → rsyslog local5 → audit.log).
 
-    Mostra só o que interessa: abertura de arquivos, renomear, excluir e
-    criar pasta. Filtra o ruído do Windows — aberturas de PASTAS (navegação
-    do Explorer, que abre o diretório várias vezes por segundo para listar
-    ícones) e repetições idênticas no mesmo instante.
+    Mostra só a AÇÃO do usuário, não o ruído do Windows. Ao listar uma
+    pasta, o Explorer abre cada arquivo para gerar ícone/miniatura — o
+    log bruto vira dezenas de "openat" no mesmo segundo. Aqui essas
+    rajadas de leitura viram UMA linha "Abriu pasta X"; o mesmo vale
+    para exclusão recursiva ("Excluiu pasta X" em vez de um unlinkat
+    por arquivo). Abertura isolada de um arquivo continua aparecendo,
+    e gravação (openat de escrita) vira "Criou/Alterou".
     """
     arquivo = '/var/log/samba/audit.log'
     rc, out, _ = run(['sudo', 'tail', f'-n{lines}', arquivo])
     if rc != 0 or not out:
         return []
-    ops = {'openat': 'Abriu', 'renameat': 'Renomeou', 'unlinkat': 'Excluiu',
-           'mkdirat': 'Criou pasta'}
-    eventos = []
-    visto = None
-    for linha in reversed(out.splitlines()):
+
+    def _ruido(alvo: str) -> bool:
+        nome = os.path.basename(alvo).lower()
+        return (nome in ('thumbs.db', 'desktop.ini', '.ds_store')
+                or nome.startswith('~$')
+                or nome.endswith(('.tmp', ':zone.identifier')))
+
+    # ── 1ª fase: parse cronológico das linhas ──────────────────────────
+    brutos = []
+    for linha in out.splitlines():
         if 'smbd_audit:' not in linha:
             continue
         pre, _, resto = linha.partition('smbd_audit:')
@@ -433,33 +441,112 @@ def get_audit_log(lines: int = 400) -> list[dict]:
         if len(partes) < 5:
             continue
         op = partes[3]
-        if op not in ops:          # ignora connect/disconnect e outros
-            continue
+        if op not in ('openat', 'renameat', 'unlinkat', 'mkdirat'):
+            continue               # ignora connect/disconnect e outros
         pre_campos = pre.split()
         if pre_campos and 'T' in pre_campos[0]:
             ts = pre_campos[0][:19].replace('T', ' ')
+            fmt = '%Y-%m-%d %H:%M:%S'
         else:
             ts = ' '.join(pre_campos[:3])
-        if op == 'renameat' and len(partes) > 6:
-            alvo = ' → '.join(partes[5:])
-        elif len(partes) > 5:
-            alvo = partes[-1]
+            fmt = '%b %d %H:%M:%S'
+        try:
+            dt = datetime.strptime(ts, fmt)
+            if dt.year == 1900:    # formato syslog não traz o ano
+                dt = dt.replace(year=datetime.now().year)
+        except ValueError:
+            dt = None
+        extras = partes[5:]
+        modo = ''                  # openat loga r/w antes do caminho
+        if op == 'openat' and extras and extras[0] in ('r', 'w'):
+            modo = extras[0]
+            extras = extras[1:]
+        if op == 'renameat' and len(extras) >= 2:
+            alvo = ' → '.join(extras)
         else:
-            alvo = ''
-        # "Abriu" numa PASTA = navegação do Explorer (ruído). Só mostra
-        # abertura quando o alvo é um arquivo de verdade (ou já não existe,
-        # ex.: foi aberto e depois movido/apagado).
-        if op == 'openat' and alvo and os.path.isdir(alvo):
+            alvo = extras[-1] if extras else ''
+        if _ruido(alvo):
             continue
-        chave = (ts, partes[0], partes[1], partes[2], op, alvo)
-        if chave == visto:         # colapsa repetições idênticas no mesmo segundo
-            continue
+        brutos.append({'ts': ts, 'dt': dt, 'usuario': partes[0],
+                       'ip': partes[1], 'share': partes[2], 'op': op,
+                       'modo': modo, 'ok': partes[4] == 'ok', 'alvo': alvo})
+
+    # Pastas conhecidas: alvo de mkdirat, pai de outro alvo do lote, ou
+    # diretório real no disco (isdir pode falhar por permissão do portal,
+    # por isso não é o único critério).
+    pais = set()
+    for e in brutos:
+        d = os.path.dirname(e['alvo'].split(' → ')[-1])
+        while len(d) > 1:
+            pais.add(d)
+            d = os.path.dirname(d)
+    dirs = {e['alvo'] for e in brutos if e['op'] == 'mkdirat'}
+    for e in brutos:
+        a = e['alvo']
+        if a and a not in dirs and (a in pais or os.path.isdir(a)):
+            dirs.add(a)
+
+    # ── 2ª fase: colapsa rajadas consecutivas do mesmo usuário ─────────
+    eventos = []
+    visto = None
+
+    def _emit(e, rotulo, alvo):
+        nonlocal visto
+        chave = (e['ts'], e['usuario'], e['ip'], e['share'], rotulo, alvo, e['ok'])
+        if chave == visto:         # repetições idênticas no mesmo segundo
+            return
         visto = chave
-        eventos.append({
-            'hora': ts, 'usuario': partes[0], 'ip': partes[1],
-            'share': partes[2], 'op': ops[op],
-            'ok': partes[4] == 'ok', 'alvo': alvo,
-        })
+        eventos.append({'hora': e['ts'], 'usuario': e['usuario'],
+                        'ip': e['ip'], 'share': e['share'], 'op': rotulo,
+                        'ok': e['ok'], 'alvo': alvo})
+
+    grupo = []                     # rajada em andamento (mesmo op/usuário)
+
+    def _flush():
+        if not grupo:
+            return
+        base = 'Abriu' if grupo[0]['op'] == 'openat' else 'Excluiu'
+        alvos = {e['alvo'] for e in grupo}
+        grupo_dirs = [a for a in alvos if a in dirs]
+        if grupo_dirs:
+            # navegação/exclusão de pasta: uma linha só, na pasta mais rasa
+            _emit(grupo[0], base + ' pasta', min(grupo_dirs, key=len))
+        elif len(alvos) >= 3:
+            pasta = os.path.commonpath(list(alvos)) if len(alvos) > 1 else grupo[0]['alvo']
+            if base == 'Abriu':
+                _emit(grupo[0], 'Abriu pasta', pasta)
+            else:
+                _emit(grupo[0], 'Excluiu', f'{pasta} ({len(alvos)} itens)')
+        else:
+            for e in grupo:
+                _emit(e, base, e['alvo'])
+        grupo.clear()
+
+    def _mesma_rajada(a, b):
+        if (a['usuario'], a['ip'], a['share'], a['op']) != \
+           (b['usuario'], b['ip'], b['share'], b['op']):
+            return False
+        if a['dt'] and b['dt']:
+            return abs((b['dt'] - a['dt']).total_seconds()) <= 2
+        return a['ts'] == b['ts']
+
+    for e in brutos:
+        agrupavel = e['ok'] and (
+            (e['op'] == 'openat' and e['modo'] != 'w') or e['op'] == 'unlinkat')
+        if agrupavel:
+            if grupo and not _mesma_rajada(grupo[-1], e):
+                _flush()
+            grupo.append(e)
+            continue
+        _flush()
+        if e['op'] == 'openat':
+            rotulo = 'Criou/Alterou' if e['modo'] == 'w' else 'Abriu'
+        else:
+            rotulo = {'renameat': 'Renomeou', 'unlinkat': 'Excluiu',
+                      'mkdirat': 'Criou pasta'}[e['op']]
+        _emit(e, rotulo, e['alvo'])
+    _flush()
+    eventos.reverse()              # mais recente primeiro
     return eventos
 
 def backup_running():
