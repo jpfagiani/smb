@@ -378,6 +378,41 @@ else
     done
 fi
 
+# =============================================================================
+# DADOS PRÉVIOS NOS DISCOS — autorização explícita de formatação
+# A role storage só formata discos com assinaturas de instalação anterior
+# se raid.confirmo_formatacao for true; discos em branco não precisam.
+# =============================================================================
+_DISCOS_COM_DADOS=()
+for _d in "${RAID_DISKS[@]}"; do
+    _sig="$(blkid -o value -s TYPE "$_d" 2>/dev/null)$(blkid -o value -s PTTYPE "$_d" 2>/dev/null)"
+    if [[ -z "$_sig" ]] && command -v mdadm &>/dev/null && mdadm --examine "$_d" &>/dev/null; then
+        _sig="md"
+    fi
+    [[ -n "$_sig" ]] && _DISCOS_COM_DADOS+=("$_d")
+done
+
+if [[ ${#_DISCOS_COM_DADOS[@]} -eq 0 ]]; then
+    # Discos em branco: formatar não destrói nada
+    CONFIRMO_FORMATACAO=true
+elif findmnt -n /mnt/raid >/dev/null 2>&1; then
+    # RAID de produção montado: a role o reaproveita; nunca autorizar formatação
+    CONFIRMO_FORMATACAO=false
+else
+    echo ""
+    warn "Os discos $(IFS=', '; echo "${_DISCOS_COM_DADOS[*]}") contêm dados de instalação anterior!"
+    echo -e "  ${DIM}Digite FORMATAR para autorizar apagá-los. Qualquer outra resposta"
+    echo -e "  preserva: a instalação só segue se o RAID antigo puder ser montado"
+    echo -e "  (use scripts/restore_pos_reinstall.sh raid <backup> antes).${NC}"
+    read -rp "  > " _RESP
+    if [[ "$_RESP" == "FORMATAR" ]]; then
+        CONFIRMO_FORMATACAO=true
+    else
+        CONFIRMO_FORMATACAO=false
+        info "Formatação NÃO autorizada — dados existentes serão preservados."
+    fi
+fi
+
 # A interface é a que o usuário selecionou explicitamente — sem remapeamento
 # automático por prefixo de IP (mudava a interface de forma silenciosa).
 
@@ -401,7 +436,11 @@ _RAID_LABEL="RAID ${RAID_LEVEL}:"
 [[ "$RAID_LEVEL" -eq 0 ]] && _RAID_LABEL="Disco único (SEM RAID):"
 printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "$_RAID_LABEL" "$(IFS=', '; echo "${RAID_DISKS[*]}")"
 echo -e "${CYAN}  ╠══════════════════════════════════════════════════════╣${NC}"
-echo -e "${CYAN}  ║${NC}  ${RED}⚠  TODOS OS DADOS NOS DISCOS SERÃO APAGADOS!${NC}       ${CYAN}║${NC}"
+if [[ "$CONFIRMO_FORMATACAO" == "true" ]]; then
+    echo -e "${CYAN}  ║${NC}  ${RED}⚠  TODOS OS DADOS NOS DISCOS SERÃO APAGADOS!${NC}       ${CYAN}║${NC}"
+else
+    echo -e "${CYAN}  ║${NC}  ${GREEN}✔  Dados existentes no RAID serão PRESERVADOS.${NC}     ${CYAN}║${NC}"
+fi
 echo -e "${CYAN}  ╚══════════════════════════════════════════════════════╝${NC}"
 echo ""
 read -rp "  Iniciar instalação? [s/N]: " _CONF
@@ -481,6 +520,9 @@ network_ranges:
 ${_RANGES_YAML}
 raid:
   level:   ${RAID_LEVEL}
+  # Autoriza formatar discos com dados de instalação anterior (gravado pelo
+  # bootstrap após confirmação; a role storage exige true para formatar)
+  confirmo_formatacao: ${CONFIRMO_FORMATACAO}
   mount:   /mnt/raid
   device:  /dev/md0
   devices:

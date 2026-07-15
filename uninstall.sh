@@ -210,6 +210,10 @@ else
     warn "RAID preservado. Desmontando apenas para garantir reinstalação limpa..."
     umount /mnt/raid 2>/dev/null || true
     warn "Monte manual após reinstalar: mount /dev/md0 /mnt/raid"
+    echo ""
+    erro "NÃO REINICIE o servidor antes de reinstalar: o mdadm foi removido e o"
+    erro "array não montará no boot. Se reiniciar, rode antes do site.yml:"
+    erro "  bash scripts/restore_pos_reinstall.sh raid <backup.tar.gz>"
 fi
 
 # ── 9. Recarregar systemd ────────────────────────────────────────────────────

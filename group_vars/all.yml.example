@@ -40,6 +40,10 @@ network_ranges:
 
 raid:
   level:   5
+  # Trava anti-formatação: a role storage só formata discos que contêm
+  # assinaturas de instalação anterior se isto for true. O bootstrap
+  # pergunta e grava; em edição manual, declare a intenção aqui.
+  confirmo_formatacao: false
   mount:   /mnt/raid
   device:  /dev/md0
   devices:

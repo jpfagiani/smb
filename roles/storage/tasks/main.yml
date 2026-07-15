@@ -13,6 +13,12 @@
 # Trava absoluta: os nomes sdX mudam entre boots (o disco do SO desta
 # máquina era sda na instalação do Debian e hoje é sdb). Se o disco que
 # hospeda o / aparecer em raid.devices, NADA roda.
+# Trava de formatação: antes do caminho destrutivo, um assemble tenta
+# remontar array existente (cobre o reboot pós-uninstall, que purga o
+# mdadm e deixa o array sem montar no boot). Se ainda assim não montar e
+# os discos tiverem assinaturas de RAID/filesystem de instalação anterior,
+# nada é formatado sem raid.confirmo_formatacao: true no group_vars/all.yml
+# (o bootstrap.sh pergunta e grava; discos em branco não exigem a flag).
 - name: Identificar o disco do sistema operacional
   ansible.builtin.shell: |
     SRC=$(findmnt -n -o SOURCE /)
@@ -47,6 +53,19 @@
   ansible.builtin.set_fact:
     dados_dev: "{{ raid.device if (raid.level | int) != 0 else (raid_devs_reais.stdout_lines | first) }}"
 
+# Após uninstall.sh + reboot o mdadm foi purgado e o array intacto não
+# montou no boot — sem este assemble ele seria tratado como "instalação
+# limpa" e formatado. Assemble nunca destrói dados (ao contrário de create).
+- name: Tentar montar arrays md existentes (recuperação pós-reinstalação)
+  ansible.builtin.shell: |
+    if ! findmnt -n {{ raid.mount }} >/dev/null 2>&1 && [ -z "$(blkid -L SAMBA_DATA 2>/dev/null)" ]; then
+        mdadm --assemble --scan 2>/dev/null || true
+        udevadm settle 2>/dev/null || true
+    fi
+  when: (raid.level | int) != 0
+  changed_when: false
+  failed_when: false
+
 - name: Tentar aproveitar RAID existente (proteção de dados)
   ansible.builtin.shell: |
     if ! findmnt -n {{ raid.mount }} >/dev/null 2>&1; then
@@ -64,6 +83,35 @@
   register: raid_montado
   failed_when: false
   changed_when: false
+
+# Última linha de defesa antes do caminho destrutivo: discos com restos de
+# uma instalação anterior só são formatados com autorização explícita.
+- name: Detectar assinaturas de dados nos discos selecionados
+  ansible.builtin.shell: |
+    for d in {{ raid_devs_reais.stdout_lines | join(' ') }}; do
+        tipo=$(blkid -o value -s TYPE "$d" 2>/dev/null)
+        ptt=$(blkid -o value -s PTTYPE "$d" 2>/dev/null)
+        if [ -n "${tipo}${ptt}" ] || mdadm --examine "$d" >/dev/null 2>&1; then
+            echo "$d (${tipo:-${ptt:-md}})"
+        fi
+    done
+  register: discos_com_dados
+  when: raid_montado.rc != 0
+  changed_when: false
+  failed_when: false
+
+- name: Abortar formatação sem confirmação explícita
+  ansible.builtin.assert:
+    that: raid.confirmo_formatacao | default(false) | bool
+    fail_msg: >-
+      PERIGO: {{ raid.mount }} não pôde ser montado e os discos
+      {{ discos_com_dados.stdout_lines | join(', ') }} contêm assinaturas de
+      RAID/filesystem de uma instalação anterior. Para PRESERVAR os dados,
+      monte o array antes e rode o playbook de novo
+      (scripts/restore_pos_reinstall.sh raid <backup>). Para APAGAR tudo,
+      defina raid.confirmo_formatacao: true no group_vars/all.yml.
+      Nenhuma alteração foi feita.
+  when: raid_montado.rc != 0 and (discos_com_dados.stdout_lines | default([]) | length) > 0
 
 - name: Parar arrays md residuais nos discos selecionados (instalação limpa)
   ansible.builtin.shell: |
