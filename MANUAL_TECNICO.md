@@ -134,6 +134,10 @@ network_ranges:               # redes com acesso ao servidor (firewall)
 raid:
   level:   5                  # nível do RAID (0 = modo disco único, SEM mdadm:
                               # o XFS vai direto no disco; sem tolerância a falhas)
+  confirmo_formatacao: false  # trava anti-formatação (ver seção 5.7): discos com
+                              # assinaturas de instalação anterior SÓ são formatados
+                              # se isto for true. O bootstrap pergunta e grava;
+                              # discos em branco instalam sem exigir a flag.
   mount:   /mnt/raid          # ponto de montagem
   device:  /dev/md0           # dispositivo do array
   devices:                    # discos-membros por caminho ESTÁVEL (/dev/disk/by-id):
@@ -353,6 +357,49 @@ systemctl start smbd nmbd cdpni-portal
 Depois atualize o `group_vars/all.yml`: `raid.level: 1` e `raid.devices` com
 os dois discos por by-id (rode `scripts/raid_ids.sh`). Faça backup antes —
 o passo 4 apaga o disco antigo.
+
+### 5.7 Reinstalação: a trava anti-formatação e os scripts de backup/restore
+
+A role `storage` decide entre "produção" e "instalação limpa" tentando montar
+o RAID. A sequência, em ordem:
+
+```
+1. /mnt/raid já está montado?                       → produção, nada destrutivo roda
+2. Existe filesystem com label SAMBA_DATA?          → monta e vira produção
+3. mdadm --assemble --scan encontra um array?       → monta e vira produção
+   (cobre o caso clássico: uninstall.sh purga o mdadm; após um reboot o
+   array intacto não monta sozinho e, sem este passo, seria "instalação limpa")
+4. Nada montou. Os discos têm assinatura de RAID/filesystem anterior?
+   → SÓ formata se raid.confirmo_formatacao: true (senão ABORTA com instruções)
+5. Discos em branco → cria o array e formata normalmente, sem exigir a flag
+```
+
+O `bootstrap.sh` preenche `confirmo_formatacao` sozinho: discos em branco →
+`true`; RAID de produção montado → `false`; discos com dados sem montar →
+pergunta e exige digitar `FORMATAR` para gravar `true`.
+
+**Fluxo completo de reinstalação preservando dados** (detalhes de uso no
+MANUAL.md, seção "Tarefas comuns"):
+
+```bash
+scripts/backup_pre_reinstall.sh            # ANTES do uninstall — salva o que ele
+                                           # destrói: passdb.tdb/secrets.tdb (senhas
+                                           # Samba + SID), passwd/shadow (usuários,
+                                           # UIDs e senhas Linux), /home (userdel -r
+                                           # apaga!), all.yml, SSL, chaves SSH,
+                                           # mdadm.conf/examine, fstab, ACLs, crontab
+uninstall.sh                               # preserva RAID; NÃO reiniciar depois!
+scripts/restore_pos_reinstall.sh raid  BK  # só se reiniciou: assemble + mount
+bootstrap.sh                               # Enter na pergunta = preservar
+scripts/restore_pos_reinstall.sh dados BK  # devolve senhas/SID/homes e confere
+                                           # UID a UID; divergência gera
+                                           # /root/fix_uids.sh (chown em 2 fases)
+```
+
+Por que a fase `dados` confere UIDs: os donos dos arquivos no XFS são gravados
+por **número** (UID/GID). Se o bootstrap recriar os usuários em outra ordem,
+os arquivos "trocam de dono" silenciosamente — o script compara o mapa antigo
+(salvo no backup) com os UIDs novos e gera a correção para revisão.
 
 ---
 

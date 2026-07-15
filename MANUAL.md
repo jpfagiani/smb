@@ -178,6 +178,39 @@ ansible-playbook -i inventory/hosts.ini site.yml --diff
 
 É seguro re-executar quantas vezes quiser: o playbook **nunca** apaga o RAID em uso nem reseta senhas já alteradas.
 
+### Reinstalar do zero preservando os dados do RAID
+
+Para desinstalar e reinstalar tudo (testes, limpeza, atualização grande) **sem
+perder os arquivos dos shares**, a ordem é:
+
+```bash
+cd /opt/smb
+# 1. Backup do que a desinstalação apaga (senhas Samba/Linux, homes, config,
+#    certificado). Gera /root/cdpni-pre-reinstall-<data>.tar.gz — COPIE PARA
+#    OUTRA MÁQUINA antes de continuar.
+sudo bash scripts/backup_pre_reinstall.sh
+
+# 2. Desinstala tudo (o RAID e os shares NÃO são tocados)
+sudo bash uninstall.sh
+
+# 3. SÓ SE o servidor reiniciou depois do passo 2 (ou foi formatado):
+#    remonta o array antes de reinstalar
+sudo bash scripts/restore_pos_reinstall.sh raid /root/cdpni-pre-reinstall-*.tar.gz
+
+# 4. Reinstala. Na pergunta sobre dados existentes nos discos, dê Enter
+#    (preservar) — só digite FORMATAR se quiser mesmo apagar tudo.
+sudo bash bootstrap.sh
+
+# 5. Devolve senhas antigas, homes e identidade do Samba
+sudo bash scripts/restore_pos_reinstall.sh dados /root/cdpni-pre-reinstall-*.tar.gz
+```
+
+**Regra de ouro: não reinicie o servidor entre a desinstalação e a
+reinstalação.** A desinstalação remove o mdadm e o array não monta no boot;
+se acontecer, o passo 3 resolve. A instalação tem uma trava: ela **nunca
+formata discos com dados de uma instalação anterior sem confirmação
+explícita** — na dúvida, ela aborta e explica o que fazer.
+
 ### Passar de disco único para RAID (depois de instalado)
 
 Dá para fazer sem perder os dados. O caminho simples: **Backups** (portal) →
@@ -218,6 +251,7 @@ cp /opt/smb/group_vars/all.yml /root/all.yml.bak
 | RAID degradado | Disco falhou | Manual técnico, seção "Substituir disco" |
 | Backup SMB falha na hora | Compartilhamento/senha errados | A mensagem do portal diz exatamente o quê; confira o compartilhamento no Windows |
 | Arquivo sumiu | Alguém excluiu | Portal → Lixeira → Restaurar |
+| Instalação aborta com "PERIGO: … assinaturas de RAID/filesystem" | Trava anti-formatação: os discos têm dados antigos e o RAID não pôde ser montado | Para preservar: `scripts/restore_pos_reinstall.sh raid <backup>` e rode de novo. Para apagar tudo: `confirmo_formatacao: true` no all.yml |
 
 ---
 
