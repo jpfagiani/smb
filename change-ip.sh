@@ -215,7 +215,11 @@ ok "Certificado antigo removido (será regenerado com novo IP)"
 step "Reaplicando Ansible (network + security + samba)"
 echo ""
 
-PLAYBOOK_CMD="cd '${SCRIPT_DIR}' && ansible-playbook -i inventory/hosts.ini site.yml --tags network,security,samba --diff"
+# O restart do smbd no final é obrigatório: com "bind interfaces only" o
+# smbd fica preso no IP que a placa tinha quando ele subiu, e o smb.conf
+# não muda numa troca de IP (referencia a placa por NOME) — nenhum handler
+# do playbook o reinicia, e os shares ficariam fora do ar no IP novo.
+PLAYBOOK_CMD="cd '${SCRIPT_DIR}' && ansible-playbook -i inventory/hosts.ini site.yml --tags network,security,samba --diff && systemctl restart smbd nmbd"
 
 if [[ -n "${SSH_CONNECTION:-}" ]]; then
     # Sessão SSH: roda desacoplado — se a conexão cair na troca de IP,
