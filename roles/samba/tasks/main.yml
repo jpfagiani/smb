@@ -165,6 +165,19 @@
     mode: "0700"
     owner: "{{ server.admin_user }}"
 
+# Na instalação limpa esta role roda ANTES da flask_portal e o usuário do
+# portal ainda não existe — o setfacl abaixo falharia ("argumento inválido").
+# Cria com os mesmos parâmetros da flask_portal (idempotente).
+- name: Garantir que o usuário de serviço do portal existe (ACL abaixo)
+  ansible.builtin.user:
+    name: "{{ portal.user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ portal.dir }}"
+    create_home: false
+    groups: shadow,adm
+    append: true
+
 # O chmod 0700 acima mascara a ACL de leitura do portal; reaplica aqui,
 # no próprio role samba, para que rodar SÓ a tag samba (ex.: change-ip.sh)
 # não deixe a página Lixeira do portal sem acesso (erro 500).
