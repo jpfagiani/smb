@@ -155,9 +155,25 @@ _SRC=$(findmnt -n -o SOURCE / 2>/dev/null || echo "")
 _PKNAME=$(lsblk -no PKNAME "$_SRC" 2>/dev/null | head -1 || true)
 SYS_DISK="/dev/${_PKNAME:-$(basename "${_SRC:-sda}" | sed 's/[0-9]*$//')}"
 
+# Identifica o conteúdo atual do disco (assinaturas) — exibido na tabela para
+# o operador saber o que há em cada um ANTES de escolher discos e nível de RAID.
+# Os "|| true" são obrigatórios: blkid retorna erro em disco vazio e, com
+# set -e, a atribuição $(...) derrubaria o script silenciosamente.
+_conteudo_disco() {
+    local d="$1" _tipo _ptt
+    _tipo=$(blkid -o value -s TYPE "$d" 2>/dev/null || true)
+    _ptt=$(blkid -o value -s PTTYPE "$d" 2>/dev/null || true)
+    if [[ "$_tipo" == "linux_raid_member" ]]; then echo "RAID anterior"
+    elif command -v mdadm &>/dev/null && mdadm --examine "$d" &>/dev/null; then echo "RAID anterior"
+    elif [[ -n "$_tipo" ]]; then echo "dados (${_tipo})"
+    elif [[ -n "$_ptt" ]]; then echo "partições (${_ptt})"
+    else echo "vazio"
+    fi
+}
+
 echo ""
-printf "  ${CYAN}%-5s %-12s %-10s %-24s %-10s${NC}\n" "Nº" "DISPOSITIVO" "TAMANHO" "MODELO" "STATUS"
-echo -e "  ${DIM}$(printf '─%.0s' {1..65})${NC}"
+printf "  ${CYAN}%-5s %-12s %-10s %-24s %-12s %-18s${NC}\n" "Nº" "DISPOSITIVO" "TAMANHO" "MODELO" "STATUS" "CONTEÚDO"
+echo -e "  ${DIM}$(printf '─%.0s' {1..82})${NC}"
 
 declare -a AVAIL_DISKS=()
 while IFS= read -r _disk; do
@@ -165,13 +181,13 @@ while IFS= read -r _disk; do
     _bytes=$(lsblk -dno SIZE -b "$_disk" 2>/dev/null || echo "0")
     _model=$(cat /sys/block/"$(basename "$_disk")"/device/model 2>/dev/null | xargs 2>/dev/null || echo "N/D")
     if [[ "$_disk" == "$SYS_DISK" ]]; then
-        printf "  ${YELLOW}%-5s %-12s %-10s %-24s %-10s${NC}\n" "[SO]" "$_disk" "$_size" "${_model:0:22}" "Sistema"
+        printf "  ${YELLOW}%-5s %-12s %-10s %-24s %-12s %-18s${NC}\n" "[SO]" "$_disk" "$_size" "${_model:0:22}" "Sistema" "-"
     elif [[ "${_bytes:-0}" -eq 0 ]]; then
-        printf "  ${YELLOW}%-5s %-12s %-10s %-24s %-10s${NC}\n" "[--]" "$_disk" "0B" "${_model:0:22}" "Sem mídia"
+        printf "  ${YELLOW}%-5s %-12s %-10s %-24s %-12s %-18s${NC}\n" "[--]" "$_disk" "0B" "${_model:0:22}" "Sem mídia" "-"
     else
         AVAIL_DISKS+=("$_disk")
         _idx=${#AVAIL_DISKS[@]}
-        printf "  ${GREEN}%-5s${NC} %-12s %-10s %-24s %-10s\n" "[$_idx]" "$_disk" "$_size" "${_model:0:22}" "Disponível"
+        printf "  ${GREEN}%-5s${NC} %-12s %-10s %-24s %-12s %-18s\n" "[$_idx]" "$_disk" "$_size" "${_model:0:22}" "Disponível" "$(_conteudo_disco "$_disk")"
     fi
 done < <(lsblk -dno NAME,TYPE 2>/dev/null | awk '$2=="disk"{print "/dev/"$1}' | sort)
 
@@ -385,11 +401,9 @@ fi
 # =============================================================================
 _DISCOS_COM_DADOS=()
 for _d in "${RAID_DISKS[@]}"; do
-    _sig="$(blkid -o value -s TYPE "$_d" 2>/dev/null)$(blkid -o value -s PTTYPE "$_d" 2>/dev/null)"
-    if [[ -z "$_sig" ]] && command -v mdadm &>/dev/null && mdadm --examine "$_d" &>/dev/null; then
-        _sig="md"
+    if [[ "$(_conteudo_disco "$_d")" != "vazio" ]]; then
+        _DISCOS_COM_DADOS+=("$_d")
     fi
-    [[ -n "$_sig" ]] && _DISCOS_COM_DADOS+=("$_d")
 done
 
 if [[ ${#_DISCOS_COM_DADOS[@]} -eq 0 ]]; then
