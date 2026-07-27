@@ -132,7 +132,7 @@ Criar novos shares, definir se são restritos (por grupo) ou públicos, e editar
 > Se o RAID aparecer **DEGRADADO**, um disco falhou: o sistema continua funcionando,
 > mas troque o disco o quanto antes (veja o manual técnico, seção RAID).
 
-### 3.6 Backups (administradores)
+### 3.6 Backups e Restauração (administradores)
 
 Dois destinos:
 
@@ -143,7 +143,33 @@ Dois destinos:
   3. **📂 Navegar** lista as pastas do destino para escolher onde gravar;
   4. **Executar Backup** — o destino é testado antes de iniciar; qualquer problema aparece na hora, em português.
 
-Marque o que incluir: arquivos dos shares, configuração do Samba, usuários e portal. O card **"Última execução"** mostra o resultado do último backup.
+Marque o que incluir: arquivos dos shares, configuração do Samba, **banco do
+Samba (senhas e SID — sem ele os usuários não conseguem logar após uma
+recuperação)**, usuários e portal. O card **"Última execução"** mostra o
+resultado do último backup.
+
+**Restaurar:** cada arquivo do **Histórico de Backups** tem o botão
+**↩ Restaurar**. Ele abre uma janela para escolher **o que** aplicar:
+
+- Por padrão vêm marcadas só as configurações (Samba + banco de senhas);
+- *Usuários/Grupos*, *Portal* e *Compartilhamentos* são opcionais — cada um
+  tem um aviso do efeito colateral (ex.: restaurar usuários sobrescreve contas
+  criadas depois do backup);
+- Antes de aplicar qualquer coisa, o portal salva as configurações atuais num
+  **`pre_restore_*.tar.gz`** que entra no próprio histórico — **para desfazer
+  uma restauração, restaure esse arquivo**;
+- O Samba é parado durante a troca e reiniciado ao final; o `smb.conf`
+  restaurado é validado com `testparm`; o andamento e o resultado aparecem no
+  card **"Última restauração (log)"**.
+
+O histórico lista os arquivos de `/opt/backups`. Backup guardado fora do
+servidor (ex.: baixado numa máquina Windows)? Use **⬆ Enviar Backup Externo**
+para subi-lo ao histórico (só `.tar.gz` do portal, até 512 MB) e restaure a
+partir dele.
+
+> **Backups antigos não têm as senhas do Samba** (o item `/var/lib/samba`
+> entrou em jul/2026). Rode um backup novo após atualizar o portal — restaurar
+> um antigo funciona para o resto, e o log avisa o que não estava no arquivo.
 
 > **RAID não é backup.** O RAID protege contra defeito de disco; o backup protege
 > contra exclusão acidental, ransomware e desastres. Faça backup em outra máquina.

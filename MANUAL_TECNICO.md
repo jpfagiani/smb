@@ -56,6 +56,7 @@ instalação, a máquina já está protegida.
 | `/etc/nftables.conf` | Regras de firewall (geradas) |
 | `/var/log/samba/audit.log` | Log de acessos a arquivos (full_audit) |
 | `/var/log/cdpni_backup.log` | Log das execuções de backup |
+| `/var/log/cdpni_restore.log` | Log das restaurações feitas pelo portal |
 | `/usr/local/bin/cdpni-*` | Wrappers privilegiados usados pelo portal |
 
 ---
@@ -696,7 +697,39 @@ O portal ainda: testa o destino com `smbclient` **antes** de iniciar (erro
 aparece na hora, traduzido), aplica `timeout 90` no mount (porta filtrada não
 pendura a tela) e grava tudo em `/var/log/cdpni_backup.log`.
 
-### 10.3 Restaurar um backup
+### 10.3 Restaurar um backup — pelo portal (recomendado)
+
+Portal → **Backups → Histórico → ↩ Restaurar**. O que o portal executa por
+baixo (tudo logado em `/var/log/cdpni_restore.log`):
+
+```bash
+# 1. Snapshot de segurança das configurações ATUAIS (o "desfazer") — entra no histórico
+tar -czf /opt/backups/pre_restore_<data>.tar.gz -C / etc/samba etc/passwd etc/shadow etc/group var/lib/samba opt/cdpni-portal
+
+# 2. Samba parado enquanto config/banco são trocados (evita tdb corrompido)
+systemctl stop smbd nmbd
+
+# 3. Extração SÓ dos itens marcados no modal (nunca o archive inteiro)
+tar -xzf backup_X.tar.gz -C / etc/samba          # um tar -x por item;
+#                                                  item ausente vira AVISO no log
+
+# 4. Validação e volta
+testparm -s        # confere o smb.conf restaurado antes de subir o Samba
+systemctl start smbd nmbd
+# (se "Portal" foi marcado: systemctl restart cdpni-portal por último —
+#  é ele quem está servindo a página)
+```
+
+Itens do modal → caminhos: Configuração Samba = `etc/samba` · Banco do Samba
+(senhas/SID) = `var/lib/samba` · Usuários = `etc/passwd shadow group` ·
+Portal = `opt/cdpni-portal` · Compartilhamentos = `mnt/raid/shares` (sobrescreve
+com as versões do backup; arquivos criados depois permanecem).
+
+O card **⬆ Enviar Backup Externo** aceita um `.tar.gz` de fora do servidor
+(recebido em `/tmp` e movido com `sudo mv` para `/opt/backups` — o diretório
+pertence ao root; limite de 512 MB vem do `client_max_body_size` do nginx).
+
+### 10.4 Restaurar na mão (sem portal)
 
 ```bash
 tar -tzf backup_X.tar.gz | head          # t = listar conteúdo (conferir antes!)
