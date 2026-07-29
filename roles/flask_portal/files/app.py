@@ -686,8 +686,12 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
 .card-body{padding:1rem}
 table{width:100%;border-collapse:collapse;font-size:.82rem}
 th{padding:.45rem .9rem;text-align:left;font-size:.67rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--bg3);border-bottom:0.5px solid var(--border)}
-td{padding:.5rem .9rem;border-bottom:0.5px solid #eef0f2;vertical-align:middle;color:var(--text)}
-tr:last-child td{border-bottom:none}tr:hover td{background:#f8f9fa}
+td{padding:.5rem .9rem;border-bottom:1px solid var(--border);vertical-align:middle;color:var(--text)}
+tr:last-child td{border-bottom:none}
+tbody tr:nth-child(even) td{background:#f6f8fb}
+tbody tr:hover td{background:#e8f1fc}
+tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+.user-avatar{display:inline-flex;width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-size:.66rem;font-weight:700;align-items:center;justify-content:center;margin-right:.5rem;vertical-align:middle;letter-spacing:.02em}
 .badge{display:inline-block;padding:.15rem .5rem;border-radius:4px;font-size:.67rem;font-weight:600}
 .badge-ok{background:#e8f5ec;border:0.5px solid #9ad0aa;color:#1a4a2a}
 .badge-warn{background:#fff8e6;border:0.5px solid #f0d080;color:#7a4a00}
@@ -1220,7 +1224,7 @@ USERS_T = BASE_T.replace("__BODY__", """
     <tbody>
     {% for u in users %}
     <tr style="opacity:{% if u.active %}1{% else %}.55{% endif %}">
-      <td><strong>{{ u.name }}</strong></td>
+      <td><span class="user-avatar">{{ u.name[:2]|upper }}</span><strong>{{ u.name }}</strong></td>
       <td class="text-muted">{{ u.uid }}</td>
       <td>
         {% if u.is_admin %}
