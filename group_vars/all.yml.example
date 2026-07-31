@@ -55,6 +55,9 @@ raid:
 
 samba:
   workgroup:    "WORKGROUP"
+  # Nomes extras pelos quais o servidor responde no Windows, sem servidor DNS
+  # (ex.: http://cdpni e \\cdpni). Registrados por NetBIOS pelo nmbd.
+  netbios_aliases: ["CDPNI"]
   default_pass: "ALTERAR_NO_BOOTSTRAP"
   log_dir:      /var/log/samba
   # Usuários com bypass de permissão no Samba (admin users)

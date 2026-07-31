@@ -5,6 +5,11 @@
     workgroup            = {{ samba.workgroup }}
     server string        = {{ server.hostname }} File Server
     netbios name         = {{ server.hostname | upper }}
+    # Nomes extras pelos quais o servidor também responde. É o que permite
+    # abrir http://cdpni (ou \\cdpni) no Windows sem servidor DNS: o nmbd
+    # registra os apelidos por NetBIOS, cujas portas 137/138 já estão
+    # liberadas no firewall.
+    netbios aliases      = {{ samba.netbios_aliases | default([org.name | default('CDPNI')]) | map('upper') | join(' ') }}
     server role          = standalone server
     security             = user
     passdb backend       = tdbsam
