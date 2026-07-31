@@ -57,10 +57,13 @@ samba:
   workgroup:    "WORKGROUP"
   # Nomes extras pelos quais o servidor responde no Windows, sem servidor DNS
   # (ex.: http://portal e \\portal). Registrados por NetBIOS pelo nmbd.
-  # Use um nome único e SEM PONTOS, diferente do workgroup acima: os clientes
-  # já registram o workgroup como nome de GRUPO, que nunca resolve para o
-  # endereço de uma máquina.
-  netbios_aliases: ["PORTAL"]
+  # Três regras para o apelido funcionar:
+  #   1. SEM PONTOS — o NetBIOS só conhece nomes de um rótulo. "portal.cdpni"
+  #      exigiria servidor DNS; "portal-cdpni", com hífen, funciona.
+  #   2. Até 15 caracteres.
+  #   3. Diferente do workgroup acima: os clientes já registram o workgroup
+  #      como nome de GRUPO, que nunca resolve para o endereço de uma máquina.
+  netbios_aliases: ["PORTAL", "PORTAL-CDPNI"]
   default_pass: "ALTERAR_NO_BOOTSTRAP"
   log_dir:      /var/log/samba
   # Usuários com bypass de permissão no Samba (admin users)
