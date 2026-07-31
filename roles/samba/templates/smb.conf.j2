@@ -6,10 +6,18 @@
     server string        = {{ server.hostname }} File Server
     netbios name         = {{ server.hostname | upper }}
     # Nomes extras pelos quais o servidor também responde. É o que permite
-    # abrir http://cdpni (ou \\cdpni) no Windows sem servidor DNS: o nmbd
+    # abrir http://portal (ou \\portal) no Windows sem servidor DNS: o nmbd
     # registra os apelidos por NetBIOS, cujas portas 137/138 já estão
     # liberadas no firewall.
-    netbios aliases      = {{ samba.netbios_aliases | default([org.name | default('CDPNI')]) | map('upper') | join(' ') }}
+    #
+    # Duas regras para o apelido funcionar:
+    #  1. NÃO pode ser igual ao workgroup ({{ samba.workgroup }}). Os clientes
+    #     Windows registram o workgroup como nome de GRUPO, e nome de grupo
+    #     nunca resolve para o endereço de uma máquina — o servidor registra,
+    #     mas nenhum cliente consegue acessar por ele.
+    #  2. Precisa ser um nome ÚNICO, sem pontos: o NetBIOS não conhece nomes
+    #     compostos como "portal.cdpni" (isso exigiria um servidor DNS).
+    netbios aliases      = {{ samba.netbios_aliases | default(['PORTAL']) | map('upper') | join(' ') }}
     server role          = standalone server
     security             = user
     passdb backend       = tdbsam
