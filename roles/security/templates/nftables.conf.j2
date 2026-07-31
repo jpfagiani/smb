@@ -9,6 +9,7 @@ flush ruleset
 define SSH_PORT   = 22
 define SMB_PORTS  = { 139, 445 }   # SMB/CIFS (TCP)
 define NB_PORTS   = { 137, 138 }   # NetBIOS (UDP) — resolução de nomes Windows
+define MDNS_PORT  = 5353           # mDNS/Avahi (UDP) — nomes .local sem DNS
 define WEB_PORTS  = { 80, 443, 8443 }  # Portal (80→443) + painel admin (8443)
 define FLASK_PORT = 5000           # Flask interno — apenas loopback
 
@@ -63,6 +64,12 @@ table inet cdpni {
 
         # ── Samba NetBIOS (UDP) ───────────────────────────────────────────────
         udp dport $NB_PORTS  ip saddr @redes_internas accept
+
+        # ── mDNS / Avahi (UDP) ────────────────────────────────────────────────
+        # Permite que os clientes resolvam nomes .local (ex.: cdpni.local) sem
+        # servidor DNS. As consultas chegam em multicast (224.0.0.251:5353);
+        # sem esta regra a política drop as descarta e o nome não resolve.
+        udp dport $MDNS_PORT ip saddr @redes_internas accept
 
         # ── Portal (80/443) e painel admin (8443) ────────────────────────────
         tcp dport $WEB_PORTS ip saddr @redes_internas accept
