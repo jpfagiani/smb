@@ -162,10 +162,22 @@ resultado do último backup.
   restaurado é validado com `testparm`; o andamento e o resultado aparecem no
   card **"Última restauração (log)"**.
 
-O histórico lista os arquivos de `/opt/backups`. Backup guardado fora do
-servidor (ex.: baixado numa máquina Windows)? Use **⬆ Enviar Backup Externo**
-para subi-lo ao histórico (só `.tar.gz` do portal, até 512 MB) e restaure a
-partir dele.
+O backup é sempre gravado **numa pasta compartilhada da rede** — guardar no
+próprio servidor não é oferecido, porque o disco de sistema tem 55 GB e os
+compartilhamentos passam de 2 TB: o arquivo enchia o disco e derrubava os
+serviços antes de terminar.
+
+Por isso o **Histórico de Backups** não lista o que foi para a rede; ele
+mostra os arquivos de `/opt/backups`, que são as cópias de segurança feitas
+antes de cada restauração (`pre_restore_*.tar.gz`) e o que você mesmo subiu.
+Para restaurar um backup que está na rede, traga-o de volta com **⬆ Enviar
+Backup Externo** (só `.tar.gz` do portal, até 512 MB) e restaure a partir
+dele.
+
+> O limite de 512 MB vale para o envio. Um backup que inclua os
+> compartilhamentos passa disso com folga — dele dá para restaurar arquivos
+> à mão, extraindo o `.tar.gz` direto na máquina onde ele está guardado
+> (ver MANUAL_TECNICO, seção 10).
 
 > **Backups antigos não têm as senhas do Samba** (o item `/var/lib/samba`
 > entrou em jul/2026). Rode um backup novo após atualizar o portal — restaurar

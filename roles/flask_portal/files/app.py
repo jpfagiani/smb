@@ -2342,18 +2342,16 @@ BACKUPS_T = BASE_T.replace("__BODY__", r"""
   <div class="card-body">
     <form method="post" action="{{ url_for('backup_run') }}" onsubmit="this.querySelector('[type=submit]').disabled=true;this.querySelector('[type=submit]').textContent='Aguarde...'">
       <div class="form-group">
-        <label>Tipo de destino</label>
-        <div style="display:flex;gap:1.5rem;margin-top:.25rem">
-          <label style="font-weight:400;font-size:.83rem"><input type="radio" name="dest_type" value="local" checked onchange="toggleDest(this.value)"> Local (no servidor)</label>
-          <label style="font-weight:400;font-size:.83rem"><input type="radio" name="dest_type" value="smb" onchange="toggleDest(this.value)"> Rede Windows (SMB)</label>
+        <label>Destino</label>
+        <div class="text-muted" style="font-size:.8rem;margin-top:.25rem">
+          O backup é gravado <strong>direto na pasta de rede</strong>, sem
+          passar pelo disco do servidor. Guardar no próprio servidor deixou de
+          ser oferecido: o disco de sistema tem 55&nbsp;GB e os
+          compartilhamentos passam de 2&nbsp;TB, então o arquivo enchia o disco
+          e derrubava os serviços antes de terminar.
         </div>
       </div>
-      <div id="dest-local" class="form-group">
-        <label>Caminho local</label>
-        <input type="text" name="backup_dest" value="{{ backup_dir }}" style="width:100%;font-family:var(--mono);font-size:.82rem" placeholder="/mnt/raid/backups">
-        <small class="text-muted">Caminho absoluto no servidor</small>
-      </div>
-      <div id="dest-smb" style="display:none">
+      <div id="dest-smb">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
           <div class="form-group">
             <label>IP / nome do computador</label>
@@ -2399,11 +2397,6 @@ BACKUPS_T = BASE_T.replace("__BODY__", r"""
   </div>
 </div>
 <script>
-function toggleDest(v) {
-  document.getElementById("dest-local").style.display = v === "local" ? "" : "none";
-  document.getElementById("dest-smb").style.display   = v === "smb"   ? "" : "none";
-  updateSmbPreview();
-}
 function updateSmbPreview() {
   var host  = (document.getElementById("smbHost")  || {value:""}).value;
   var share = (document.getElementById("smbShare") || {value:""}).value;
@@ -2418,10 +2411,7 @@ function updateSmbPreview() {
   var el = document.getElementById(id);
   if (el) el.addEventListener("input", updateSmbPreview);
 });
-(function() {
-  var sel = document.querySelector("input[name='dest_type']:checked");
-  if (sel) toggleDest(sel.value);
-})();
+updateSmbPreview();
 function smbBrowse(path) {
   var host  = document.getElementById("smbHost").value.trim();
   var share = document.getElementById("smbShare").value.trim();
@@ -2569,7 +2559,12 @@ function smbSelectCurrent() {
     </tbody>
   </table>
   {% else %}
-  <div class="card-body text-muted" style="font-size:.82rem">Nenhum backup em {{ backup_dir }}</div>
+  <div class="card-body text-muted" style="font-size:.82rem">
+    Nenhum arquivo em {{ backup_dir }}. Os backups são gravados na pasta de
+    rede escolhida acima e não passam por aqui — esta lista guarda os que
+    foram enviados de volta pelo cartão abaixo e as cópias de segurança
+    feitas antes de cada restauração.
+  </div>
   {% endif %}
 </div>
 <div class="card" style="margin-top:1rem">
@@ -2820,76 +2815,73 @@ def backup_run():
             flash('Selecione ao menos um item para incluir no backup.', 'error')
             return redirect(url_for('backups_page'))
 
-        dest_type = request.form.get('dest_type', 'local')
+        # Só existe destino de rede. O backup local gravava em /opt/backups,
+        # no disco de sistema de 55 GB, enquanto os compartilhamentos passam
+        # de 2 TB: o tar ia crescendo até zerar o disco, e aí todo serviço que
+        # precisa escrever para de funcionar — foi o que derrubou o portal da
+        # intranet em 06/08/2026. Formulário antigo aberto numa aba parada
+        # ainda pode mandar dest_type=local; recusa com explicação.
+        if request.form.get('dest_type') == 'local':
+            flash('Backup no próprio servidor não é mais permitido: o disco de '
+                  'sistema não comporta os compartilhamentos e enche antes de '
+                  'terminar. Recarregue a página e informe a pasta de rede.',
+                  'error')
+            return redirect(url_for('backups_page'))
 
-        if dest_type == 'smb':
-            smb_host  = request.form.get('smb_host', '').strip()
-            smb_share = request.form.get('smb_share', '').strip()
-            smb_user  = request.form.get('smb_user', '').strip()
-            smb_pass  = request.form.get('smb_pass', '').strip()
-            if not smb_host or not smb_share:
-                flash('Informe o IP e o nome do compartilhamento Windows.', 'error')
-                return redirect(url_for('backups_page'))
-            # Pré-teste: valida host/share/credenciais ANTES de iniciar —
-            # sem isso o backup "iniciava" e morria em silêncio no mount
-            rc_t, out_t, err_t = run(['smbclient', f'//{smb_host}/{smb_share}',
-                                      '-U', f'{smb_user}%{smb_pass}', '-c', 'ls'])
-            if rc_t != 0:
-                flash(f'Não foi possível acessar \\\\{smb_host}\\{smb_share}: '
-                      f'{smb_erro_amigavel(err_t or out_t)}', 'error')
-                return redirect(url_for('backups_page'))
-            # Monta o compartilhamento CIFS e grava direto na rede (sem espaço local)
-            import shlex
-            smb_sub  = request.form.get('smb_sub', '').strip().strip('\\').strip('/')
-            mnt      = f'/run/smb_backup_{timestamp}'
-            sub_path = smb_sub.replace('\\', '/') if smb_sub else ''
-            dest_dir = os.path.join(mnt, sub_path) if sub_path else mnt
-            out_file = os.path.join(dest_dir, filename)
-            # caminhos relativos + tar -C /: evita o aviso "Removendo '/'
-            # inicial dos nomes dos membros" que assustava no log
-            tar_srcs = ' '.join(shlex.quote(t.lstrip('/')) for t in targets)
-            # Sem vers= fixo: o kernel negocia a maior versão SMB que o
-            # destino suportar (vers=3.0 fixo falhava em Windows antigos)
-            smb_opts = shlex.quote(
-                f'username={smb_user},password={smb_pass},uid=0,gid=0'
-            )
-            log = '/var/log/cdpni_backup.log'
-            script = (
-                f'exec >>{shlex.quote(log)} 2>&1; '
-                f'echo "=== $(date "+%d/%m/%Y %H:%M:%S") backup SMB para //{smb_host}/{smb_share} ==="; '
-                f'mkdir -p {shlex.quote(mnt)} && '
-                f'timeout 90 mount -t cifs //{smb_host}/{smb_share} {shlex.quote(mnt)} -o {smb_opts} && '
-                f'mkdir -p {shlex.quote(dest_dir)} && '
-                f'{tar} -czf {shlex.quote(out_file)} -C / {tar_srcs} && '
-                f'echo "OK: backup concluído ({filename})" '
-                f'|| echo "ERRO: backup falhou — veja as mensagens acima"; '
-                f'umount {shlex.quote(mnt)} 2>/dev/null; '
-                f'rmdir {shlex.quote(mnt)} 2>/dev/null; true'
-            )
-            proc = subprocess.Popen(
-                ['sudo', 'bash', '-c', script],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                start_new_session=True
-            )
-            pgid = os.getpgid(proc.pid)
-            with open(BACKUP_INFO_FILE, 'w') as fp:
-                json.dump({'pid': proc.pid, 'pgid': pgid, 'file': out_file,
-                           'filename': filename, 'started': time.time(),
-                           'type': 'smb'}, fp)
-            flash(f'Backup SMB iniciado → \\\\{smb_host}\\{smb_share}\\{filename}', 'success')
-        else:
-            dest = request.form.get('backup_dest', BACKUP_DIR).strip() or BACKUP_DIR
-            run(['sudo', 'mkdir', '-p', dest])
-            out_file = os.path.join(dest, filename)
-            proc = subprocess.Popen(
-                ['sudo', tar, '-czf', out_file, '-C', '/'] + [t.lstrip('/') for t in targets],
-                start_new_session=True
-            )
-            pgid = os.getpgid(proc.pid)
-            with open(BACKUP_INFO_FILE, 'w') as fp:
-                json.dump({'pid': proc.pid, 'pgid': pgid, 'file': out_file,
-                           'filename': filename, 'started': time.time()}, fp)
-            flash(f'Backup iniciado → {out_file}', 'success')
+        smb_host  = request.form.get('smb_host', '').strip()
+        smb_share = request.form.get('smb_share', '').strip()
+        smb_user  = request.form.get('smb_user', '').strip()
+        smb_pass  = request.form.get('smb_pass', '').strip()
+        if not smb_host or not smb_share:
+            flash('Informe o IP e o nome do compartilhamento Windows.', 'error')
+            return redirect(url_for('backups_page'))
+        # Pré-teste: valida host/share/credenciais ANTES de iniciar —
+        # sem isso o backup "iniciava" e morria em silêncio no mount
+        rc_t, out_t, err_t = run(['smbclient', f'//{smb_host}/{smb_share}',
+                                  '-U', f'{smb_user}%{smb_pass}', '-c', 'ls'])
+        if rc_t != 0:
+            flash(f'Não foi possível acessar \\\\{smb_host}\\{smb_share}: '
+                  f'{smb_erro_amigavel(err_t or out_t)}', 'error')
+            return redirect(url_for('backups_page'))
+        # Monta o compartilhamento CIFS e grava direto na rede (sem espaço local)
+        import shlex
+        smb_sub  = request.form.get('smb_sub', '').strip().strip('\\').strip('/')
+        mnt      = f'/run/smb_backup_{timestamp}'
+        sub_path = smb_sub.replace('\\', '/') if smb_sub else ''
+        dest_dir = os.path.join(mnt, sub_path) if sub_path else mnt
+        out_file = os.path.join(dest_dir, filename)
+        # caminhos relativos + tar -C /: evita o aviso "Removendo '/'
+        # inicial dos nomes dos membros" que assustava no log
+        tar_srcs = ' '.join(shlex.quote(t.lstrip('/')) for t in targets)
+        # Sem vers= fixo: o kernel negocia a maior versão SMB que o
+        # destino suportar (vers=3.0 fixo falhava em Windows antigos)
+        smb_opts = shlex.quote(
+            f'username={smb_user},password={smb_pass},uid=0,gid=0'
+        )
+        log = '/var/log/cdpni_backup.log'
+        script = (
+            f'exec >>{shlex.quote(log)} 2>&1; '
+            f'echo "=== $(date "+%d/%m/%Y %H:%M:%S") backup SMB para //{smb_host}/{smb_share} ==="; '
+            f'mkdir -p {shlex.quote(mnt)} && '
+            f'timeout 90 mount -t cifs //{smb_host}/{smb_share} {shlex.quote(mnt)} -o {smb_opts} && '
+            f'mkdir -p {shlex.quote(dest_dir)} && '
+            f'{tar} -czf {shlex.quote(out_file)} -C / {tar_srcs} && '
+            f'echo "OK: backup concluído ({filename})" '
+            f'|| echo "ERRO: backup falhou — veja as mensagens acima"; '
+            f'umount {shlex.quote(mnt)} 2>/dev/null; '
+            f'rmdir {shlex.quote(mnt)} 2>/dev/null; true'
+        )
+        proc = subprocess.Popen(
+            ['sudo', 'bash', '-c', script],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            start_new_session=True
+        )
+        pgid = os.getpgid(proc.pid)
+        with open(BACKUP_INFO_FILE, 'w') as fp:
+            json.dump({'pid': proc.pid, 'pgid': pgid, 'file': out_file,
+                       'filename': filename, 'started': time.time(),
+                       'type': 'smb'}, fp)
+        flash(f'Backup SMB iniciado → \\\\{smb_host}\\{smb_share}\\{filename}', 'success')
 
     except Exception as e:
         flash(f'Erro ao iniciar backup: {e}', 'error')

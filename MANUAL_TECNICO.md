@@ -667,16 +667,19 @@ setfacl -m u:cdpni:rx <dir>           # -m = modifica; u:usuário:permissões
 
 ## 10. Backup
 
-### 10.1 Local
+### 10.1 Por que não existe backup "local"
 
-```bash
-tar -czf /opt/backups/backup_X.tar.gz -C / mnt/raid/shares etc/samba
-#   │ │ │                              │  └─ caminhos RELATIVOS (sem a / inicial)
-#   │ │ │                              └─ "-C /" muda para a raiz antes de arquivar
-#   │ │ └─ f = nome do arquivo de saída      (evita o aviso "Removendo /")
-#   │ └─ z = comprime com gzip
-#   └─ c = criar arquivo
-```
+O portal **não** oferece gravar o backup no próprio servidor, e não é
+esquecimento. O disco de sistema (`/dev/sdb1`) tem 55 GB; os
+compartilhamentos, em `/mnt/raid`, passam de 2 TB. Um `tar` dos shares para
+qualquer pasta do disco de sistema cresce até zerá-lo, e disco cheio derruba
+tudo que precisa escrever — foi assim que o portal da intranet saiu do ar em
+06/08/2026, com o SQLite respondendo `database or disk is full` no boot.
+
+Se algum dia for preciso guardar em disco local, o destino tem que ser um
+volume que caiba o conteúdo (`/mnt/raid` tem 1,7 TB livres), **nunca** `/` —
+e mesmo assim RAID não é backup: o arquivo fica no mesmo servidor que ele
+deveria proteger.
 
 ### 10.2 Em rede (o que o portal executa)
 
