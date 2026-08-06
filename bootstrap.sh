@@ -319,25 +319,8 @@ while true; do
 done
 ok "Senha Samba definida"
 
-# Senha do painel web (digitada, não exibida)
-echo ""
-while true; do
-    ask "Senha do painel web (admin) [porta 8443]:"
-    read -rsp "  > " PANEL_PASS; echo ""
-    valid_pass "$PANEL_PASS"; _rc=$?
-    if [[ $_rc -eq 2 ]]; then
-        warn "Senha com caracteres inválidos — NÃO use setas/Tab/teclas especiais ao digitar. Tente de novo."
-        continue
-    elif [[ $_rc -ne 0 ]]; then
-        warn "Senha fraca. Use ao menos 8 chars com maiúsc., minúsc. e número."
-        continue
-    fi
-    ask "Confirme a senha:"
-    read -rsp "  > " _PASS2; echo ""
-    [[ "$PANEL_PASS" == "$_PASS2" ]] && break
-    warn "Senhas não coincidem"
-done
-ok "Senha do painel definida"
+# Não se pergunta senha do portal: ele autentica por PAM, com a conta do
+# Linux — a senha do portal É a senha do administrador definida acima.
 
 # Seleção de discos para RAID
 echo ""
@@ -445,7 +428,6 @@ printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "Hostname:"        "${
 printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "Unidade:"         "${ORG_SIGLA}"
 printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "Admin:"           "${ADMIN_USER}"
 printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "Senha Samba:"     "$(printf '*%.0s' {1..${#SAMBA_PASS}})"
-printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "Senha Painel:"    "$(printf '*%.0s' {1..${#PANEL_PASS}})"
 _RAID_LABEL="RAID ${RAID_LEVEL}:"
 [[ "$RAID_LEVEL" -eq 0 ]] && _RAID_LABEL="Disco único (SEM RAID):"
 printf  "${CYAN}  ║${NC}  %-24s %-27s${CYAN}║${NC}\n" "$_RAID_LABEL" "$(IFS=', '; echo "${RAID_DISKS[*]}")"
@@ -560,11 +542,6 @@ ssl:
   country:  BR
   state:    SP
   org:      "${ORG_SIGLA}"
-
-panel:
-  dir:  /var/www/samba-panel
-  user: admin
-  pass: "${PANEL_PASS}"
 YAML
 
 ok "group_vars/all.yml gerado"

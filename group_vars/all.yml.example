@@ -83,8 +83,3 @@ ssl:
   country:  BR
   state:    SP
   org:      CDPNI
-
-panel:
-  dir:  /var/www/samba-panel
-  user: admin
-  pass: "ALTERAR_NO_BOOTSTRAP"
