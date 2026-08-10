@@ -1266,9 +1266,7 @@ USERS_T = BASE_T.replace("__BODY__", """
     {% for u in users %}
     <tr style="opacity:{% if u.active %}1{% else %}.55{% endif %}">
       <td>
-        {% if u.name != session.user %}
         <input type="checkbox" class="sel-usuario" value="{{ u.name }}" onclick="contarSel()">
-        {% endif %}
       </td>
       <td><span class="user-avatar">{{ u.name[:2]|upper }}</span><strong>{{ u.name }}</strong></td>
       <td class="text-muted">{{ u.uid }}</td>
@@ -1297,12 +1295,14 @@ USERS_T = BASE_T.replace("__BODY__", """
         <span style="display:inline-flex;gap:3px;align-items:center">
           <button class="btn btn-xs" style="min-width:48px;text-align:center;justify-content:center" onclick="openResetPass('{{ u.name }}')">Senha</button>
           <button class="btn btn-xs" style="min-width:76px;text-align:center;justify-content:center" onclick="openPerms('{{ u.name }}')">Permissões</button>
+          {# Papel e exclusão continuam travados na própria conta: perder o
+             admin, ou a conta, tira o painel de quem está mexendo. Ativar e
+             inativar não — o painel autentica por PAM e grupo de admin, sem
+             olhar shell nem flag do Samba, então mexer no próprio acesso a
+             arquivos não fecha a porta de volta. #}
           {% if u.name == session.user %}
             <button class="btn btn-xs" style="min-width:90px;text-align:center;justify-content:center" disabled title="Não é possível alterar seu próprio papel">↓ Tornar Comum</button>
-            <button class="btn btn-xs" style="min-width:58px;text-align:center;justify-content:center" disabled title="Não é possível inativar seu próprio usuário">Inativar</button>
-            <button class="btn btn-xs btn-danger" style="min-width:48px;text-align:center;justify-content:center" disabled title="Não é possível excluir seu próprio usuário">Excluir</button>
-          {% else %}
-          {% if u.is_admin %}
+          {% elif u.is_admin %}
             <button class="btn btn-xs btn-warn" style="min-width:90px;text-align:center;justify-content:center" onclick="confirmRole('{{ u.name }}','comum')">↓ Tornar Comum</button>
           {% else %}
             <button class="btn btn-xs btn-success" style="min-width:90px;text-align:center;justify-content:center" onclick="confirmRole('{{ u.name }}','admin')">↑ Tornar Admin</button>
@@ -1312,7 +1312,10 @@ USERS_T = BASE_T.replace("__BODY__", """
           {% else %}
             <button class="btn btn-xs btn-success" style="min-width:58px;text-align:center;justify-content:center" onclick="confirmToggle('{{ u.name }}','activate')">Ativar</button>
           {% endif %}
-          <button class="btn btn-xs btn-danger" style="min-width:48px;text-align:center;justify-content:center" onclick="confirmDelUser('{{ u.name }}')">Excluir</button>
+          {% if u.name == session.user %}
+            <button class="btn btn-xs btn-danger" style="min-width:48px;text-align:center;justify-content:center" disabled title="Não é possível excluir seu próprio usuário">Excluir</button>
+          {% else %}
+            <button class="btn btn-xs btn-danger" style="min-width:48px;text-align:center;justify-content:center" onclick="confirmDelUser('{{ u.name }}')">Excluir</button>
           {% endif %}
         </span>
       </td>
@@ -1618,9 +1621,10 @@ def user_toggle():
     if not re.match(r'^[a-z][a-z0-9_-]{0,31}$', username):
         flash('Usuário inválido', 'error')
         return redirect(url_for('users_page'))
-    if username == session.get('user'):
-        flash('Não é possível alterar o próprio usuário logado', 'error')
-        return redirect(url_for('users_page'))
+    # A própria conta pode ser ativada e inativada: isto mexe em shell e no
+    # Samba, e o painel não consulta nem um nem outro para deixar entrar.
+    # Continuam barrados o rebaixamento e a exclusão de si mesmo, esses sim
+    # sem volta pelo painel.
     if action == 'activate':
         rc, _, err = run(['sudo', 'usermod', '-s', '/bin/bash', username])
         # Desfaz o `smbpasswd -d` da inativação. Sem isto a conta voltava a
@@ -1648,17 +1652,14 @@ def users_bulk():
         flash('Ação inválida', 'error')
         return redirect(url_for('users_page'))
 
-    eu = session.get('user')
-    feitos, ignorados, erros = [], [], []
+    feitos, recusados, erros = [], [], []
     for username in request.form.getlist('usuarios'):
         username = username.strip()
+        # Nome fora do padrão do sistema (maiúscula, ponto, acento) não vira
+        # comando — e vai para a mensagem, senão sumia sem explicação e a
+        # conta parecia ter sido ignorada de propósito.
         if not re.match(r'^[a-z][a-z0-9_-]{0,31}$', username):
-            erros.append(username or '(vazio)')
-            continue
-        # A própria conta fica de fora, como no botão de linha: quem inativa a
-        # si mesmo perde o painel e não tem como voltar por ele.
-        if username == eu:
-            ignorados.append(username)
+            recusados.append(username or '(vazio)')
             continue
         if action == 'activate':
             rc, _, _ = run(['sudo', 'usermod', '-s', '/bin/bash', username])
@@ -1671,11 +1672,12 @@ def users_bulk():
     verbo = 'ativado' if action == 'activate' else 'inativado'
     if feitos:
         flash(f'{len(feitos)} usuário(s) {verbo}(s): {", ".join(feitos)}', 'success')
-    if ignorados:
-        flash(f'Seu próprio usuário ({", ".join(ignorados)}) não foi alterado.', 'error')
+    if recusados:
+        flash('Nome fora do padrão do sistema (só minúsculas, números, _ e -), '
+              f'não alterado: {", ".join(recusados)}', 'error')
     if erros:
-        flash(f'Falhou em: {", ".join(erros)}', 'error')
-    if not feitos and not ignorados and not erros:
+        flash(f'O sistema recusou a mudança em: {", ".join(erros)}', 'error')
+    if not feitos and not recusados and not erros:
         flash('Nenhum usuário selecionado.', 'error')
     return redirect(url_for('users_page'))
 
