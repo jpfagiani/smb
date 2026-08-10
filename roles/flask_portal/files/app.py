@@ -163,10 +163,36 @@ def get_user_share_perms(username: str) -> dict:
     """Retorna dict {share_name: 'rwx'} para o usuário (armazenado em JSON)."""
     return _load_perms_file().get(username, {})
 
+def get_samba_disabled() -> set[str]:
+    """Contas marcadas como desabilitadas (flag D) no banco do Samba.
+
+    Uma chamada só para a lista inteira: `pdbedit -L -v <usuário>` custaria um
+    processo por linha da tabela. O `-v` descreve as contas sem imprimir hash
+    de senha, ao contrário do `-w`, que despeja o formato smbpasswd.
+
+    Falhando (pdbedit ausente, sem sudo), devolve conjunto vazio: a lista
+    volta a valer só pelo shell, que é o comportamento antigo — nunca uma
+    página de erro por causa de um selo.
+    """
+    desabilitadas, atual = set(), ''
+    rc, saida, _ = run(['sudo', 'pdbedit', '-L', '-v'])
+    if rc != 0:
+        return desabilitadas
+    for linha in saida.splitlines():
+        if linha.startswith('Unix username:'):
+            atual = linha.split(':', 1)[1].strip()
+        elif linha.startswith('Account Flags:') and atual:
+            # Vem no formato "[DU         ]"; só o miolo interessa.
+            if 'D' in linha.split(':', 1)[1].strip().strip('[]'):
+                desabilitadas.add(atual)
+    return desabilitadas
+
+
 def get_system_users() -> list[dict]:
     users = []
     NOLOGIN = {'/usr/sbin/nologin', '/bin/false', '/sbin/nologin'}
     admins  = get_admin_group_members() | ADMIN_USERS
+    samba_off = get_samba_disabled()
     try:
         with open('/etc/passwd') as f:
             for line in f:
@@ -178,12 +204,16 @@ def get_system_users() -> list[dict]:
                     continue
                 shell = parts[6]
                 name  = parts[0]
+                # "Ativo" tem de significar "consegue usar o servidor". Olhar
+                # só o shell dizia Ativo para quem estava bloqueado no Samba e
+                # não abria compartilhamento nenhum.
                 users.append({
                     'name':    name,
                     'uid':     uid,
                     'home':    parts[5],
                     'shell':   shell,
-                    'active':  shell not in NOLOGIN,
+                    'active':  shell not in NOLOGIN and name not in samba_off,
+                    'samba_off': name in samba_off,
                     'is_admin': name in admins,
                 })
     except Exception:
@@ -1216,14 +1246,30 @@ USERS_T = BASE_T.replace("__BODY__", """
 <div class="page-title">👥 Usuários do Sistema</div>
 <div class="actions">
   <button class="btn btn-primary" onclick="document.getElementById('mNewUser').classList.add('open')">➕ Novo Usuário</button>
+  <button class="btn btn-success" onclick="aplicarEmMassa('activate')">Ativar selecionados</button>
+  <button class="btn btn-warn" onclick="aplicarEmMassa('deactivate')">Inativar selecionados</button>
+  <span class="text-muted" id="contaSel" style="font-size:.78rem;align-self:center"></span>
 </div>
 <div class="card">
   <div class="card-header"><h3>Usuários</h3><span class="text-muted" style="font-size:.76rem">{{ users|length }}</span></div>
   <table>
-    <thead><tr><th>Usuário</th><th>UID</th><th>Papel</th><th>Status</th><th class="text-right">Ações</th></tr></thead>
+    <thead><tr>
+      <th style="width:1%">
+        {# Marca a coluna inteira: ativar um a um uma lista restaurada de
+           backup levava um clique e uma confirmação por pessoa. #}
+        <input type="checkbox" id="selTodos" onclick="marcarTodos(this.checked)"
+               title="Selecionar todos">
+      </th>
+      <th>Usuário</th><th>UID</th><th>Papel</th><th>Status</th><th class="text-right">Ações</th>
+    </tr></thead>
     <tbody>
     {% for u in users %}
     <tr style="opacity:{% if u.active %}1{% else %}.55{% endif %}">
+      <td>
+        {% if u.name != session.user %}
+        <input type="checkbox" class="sel-usuario" value="{{ u.name }}" onclick="contarSel()">
+        {% endif %}
+      </td>
       <td><span class="user-avatar">{{ u.name[:2]|upper }}</span><strong>{{ u.name }}</strong></td>
       <td class="text-muted">{{ u.uid }}</td>
       <td>
@@ -1236,6 +1282,13 @@ USERS_T = BASE_T.replace("__BODY__", """
       <td>
         {% if u.active %}
           <span style="color:var(--success);font-size:.75rem;font-weight:600">● Ativo</span>
+        {% elif u.samba_off and u.shell not in ('/usr/sbin/nologin', '/bin/false', '/sbin/nologin') %}
+          {# Login do Linux liberado, mas bloqueado no Samba: some do
+             \\servidor sem motivo aparente. Dizer qual das duas coisas está
+             travada evita procurar defeito na rede ou no Windows. #}
+          <span style="color:var(--warn);font-size:.75rem;font-weight:600"
+                title="A conta existe, mas está desabilitada no Samba (flag D). Use Ativar.">
+            ● Sem acesso aos arquivos</span>
         {% else %}
           <span style="color:var(--muted);font-size:.75rem;font-weight:600">○ Inativo</span>
         {% endif %}
@@ -1335,6 +1388,10 @@ USERS_T = BASE_T.replace("__BODY__", """
   <input type="hidden" name="username" id="roleUsername">
   <input type="hidden" name="role"     id="roleValue">
 </form>
+<form method="post" id="fEmMassa" action="{{ url_for('users_bulk') }}" style="display:none">
+  <input type="hidden" name="action" id="massaAcao">
+  <div id="massaAlvos"></div>
+</form>
 
 <script>
 var SHARES = {{ shares_json|safe }};
@@ -1343,12 +1400,46 @@ function closeModal(id){document.getElementById(id).classList.remove('open');}
 document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open');}));
 function openResetPass(u){document.getElementById('rpUsername').value=u;document.getElementById('rpUserLabel').value=u;document.getElementById('mResetPass').classList.add('open');}
 function confirmDelUser(u){if(!confirm('Excluir usuário "'+u+'"? Remove do sistema e do Samba.'))return;document.getElementById('delUsername').value=u;document.getElementById('fDelUser').submit();}
+// Sem confirmacao: ativar e inativar sao reversiveis com um clique no botao
+// vizinho, e a pergunta a cada linha tornava penoso arrumar uma lista inteira.
 function confirmToggle(u,action){
-  var msg=action==='activate'?'Ativar usuário "'+u+'"?':'Inativar "'+u+'"? Acesso ao Samba será bloqueado.';
-  if(!confirm(msg))return;
   document.getElementById('toggleUsername').value=u;
   document.getElementById('toggleAction').value=action;
   document.getElementById('fToggleUser').submit();
+}
+function selecionados(){
+  return Array.prototype.slice
+    .call(document.querySelectorAll('.sel-usuario:checked'))
+    .map(function(cb){return cb.value;});
+}
+function contarSel(){
+  var n=selecionados().length, total=document.querySelectorAll('.sel-usuario').length;
+  document.getElementById('contaSel').textContent = n ? n+' selecionado'+(n>1?'s':'') : '';
+  var todos=document.getElementById('selTodos');
+  todos.checked = n>0 && n===total;
+  todos.indeterminate = n>0 && n<total;
+}
+function marcarTodos(marcado){
+  document.querySelectorAll('.sel-usuario').forEach(function(cb){cb.checked=marcado;});
+  contarSel();
+}
+function aplicarEmMassa(action){
+  var nomes=selecionados();
+  if(!nomes.length){alert('Marque ao menos um usuário na lista.');return;}
+  // Ativar em massa vai direto. Inativar confirma porque um clique pode tirar
+  // o acesso da unidade inteira de uma vez — e ninguem descobre pelo painel,
+  // descobre pelo telefone tocando.
+  if(action==='deactivate' &&
+     !confirm('Inativar '+nomes.length+' usuário(s)? Eles perdem o acesso aos arquivos.'))return;
+  var alvos=document.getElementById('massaAlvos');
+  alvos.innerHTML='';
+  nomes.forEach(function(n){
+    var i=document.createElement('input');
+    i.type='hidden'; i.name='usuarios'; i.value=n;
+    alvos.appendChild(i);
+  });
+  document.getElementById('massaAcao').value=action;
+  document.getElementById('fEmMassa').submit();
 }
 function confirmRole(u,role){
   var msg=role==='admin'?'Promover "'+u+'" a Administrador?':'Rebaixar "'+u+'" para Usuário Comum?';
@@ -1532,12 +1623,60 @@ def user_toggle():
         return redirect(url_for('users_page'))
     if action == 'activate':
         rc, _, err = run(['sudo', 'usermod', '-s', '/bin/bash', username])
+        # Desfaz o `smbpasswd -d` da inativação. Sem isto a conta voltava a
+        # aparecer como ativa na lista e continuava sem abrir os
+        # compartilhamentos: a marca D fica no banco do Samba até alguém rodar
+        # o -e, e nem trocar a senha a remove.
+        run(['sudo', 'smbpasswd', '-e', username])
         msg = f'Usuário "{username}" ativado' if rc == 0 else f'Erro: {err}'
     else:
         rc, _, err = run(['sudo', 'usermod', '-s', '/usr/sbin/nologin', username])
         run(['sudo', 'smbpasswd', '-d', username])
         msg = f'Usuário "{username}" inativado' if rc == 0 else f'Erro: {err}'
     flash(msg, 'success' if rc == 0 else 'error')
+    return redirect(url_for('users_page'))
+
+@app.route('/admin/users/bulk', methods=['POST'])
+@admin_required
+def users_bulk():
+    """Ativa ou inativa vários usuários de uma vez.
+
+    Lista restaurada de backup volta com todo mundo sem acesso; arrumar um a
+    um custava um clique e uma confirmação por pessoa."""
+    action = request.form.get('action', '')
+    if action not in ('activate', 'deactivate'):
+        flash('Ação inválida', 'error')
+        return redirect(url_for('users_page'))
+
+    eu = session.get('user')
+    feitos, ignorados, erros = [], [], []
+    for username in request.form.getlist('usuarios'):
+        username = username.strip()
+        if not re.match(r'^[a-z][a-z0-9_-]{0,31}$', username):
+            erros.append(username or '(vazio)')
+            continue
+        # A própria conta fica de fora, como no botão de linha: quem inativa a
+        # si mesmo perde o painel e não tem como voltar por ele.
+        if username == eu:
+            ignorados.append(username)
+            continue
+        if action == 'activate':
+            rc, _, _ = run(['sudo', 'usermod', '-s', '/bin/bash', username])
+            run(['sudo', 'smbpasswd', '-e', username])
+        else:
+            rc, _, _ = run(['sudo', 'usermod', '-s', '/usr/sbin/nologin', username])
+            run(['sudo', 'smbpasswd', '-d', username])
+        (feitos if rc == 0 else erros).append(username)
+
+    verbo = 'ativado' if action == 'activate' else 'inativado'
+    if feitos:
+        flash(f'{len(feitos)} usuário(s) {verbo}(s): {", ".join(feitos)}', 'success')
+    if ignorados:
+        flash(f'Seu próprio usuário ({", ".join(ignorados)}) não foi alterado.', 'error')
+    if erros:
+        flash(f'Falhou em: {", ".join(erros)}', 'error')
+    if not feitos and not ignorados and not erros:
+        flash('Nenhum usuário selecionado.', 'error')
     return redirect(url_for('users_page'))
 
 # ── grupos ─────────────────────────────────────────────────────────────────────
