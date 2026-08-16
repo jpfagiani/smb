@@ -80,6 +80,14 @@ portal:
   user: cdpni
   port: 5000
 
+# ── Portas de outros sistemas nesta máquina ─────────────────────────────────
+# O firewall tem política DROP: o que não estiver liberado some da rede sem
+# aviso. Se a máquina também roda GWOS (DNS 53, hora 123, painel 8080) ou
+# outro portal, liste as portas aqui. O bootstrap detecta e preenche sozinho.
+firewall:
+  extra_tcp: []      # ex.: [53, 8080]
+  extra_udp: []      # ex.: [53, 123]
+
 ssl:
   dir:      /etc/nginx/ssl
   cert:     /etc/nginx/ssl/cdpni.crt

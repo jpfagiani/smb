@@ -425,6 +425,43 @@ else
 fi
 
 # =============================================================================
+# SERVIÇOS DE OUTROS SISTEMAS NESTA MÁQUINA
+# O firewall do Samba tem política DROP. Numa máquina compartilhada, tudo que
+# não for liberado aqui some da rede em silêncio — o sintoma seria "o DNS parou
+# depois que instalei o Samba", sem nada no log apontando o firewall.
+# =============================================================================
+EXTRA_TCP=()
+EXTRA_UDP=()
+
+_porta_em_uso() { ss -lntuH "sport = :$1" 2>/dev/null | grep -q .; }
+
+if [[ -d /etc/gwos/modulos.d ]]; then
+    _mods=$(ls /etc/gwos/modulos.d/ 2>/dev/null | paste -sd ', ' -)
+    echo ""
+    info "GWOS detectado nesta máquina: ${_mods}"
+
+    if [[ -e /etc/gwos/modulos.d/dns-bind9 ]]; then
+        EXTRA_TCP+=(53); EXTRA_UDP+=(53)
+        echo "  → liberando 53 (DNS)"
+    fi
+    if [[ -e /etc/gwos/modulos.d/hora-chrony ]]; then
+        EXTRA_UDP+=(123)
+        echo "  → liberando 123 (NTP)"
+    fi
+    if [[ -e /etc/gwos/modulos.d/painel-web ]]; then
+        _pp=$(awk -F= '/^PAINEL_PORTA=/{print $2}' /etc/gwos/gwos.conf 2>/dev/null | tr -d ' ')
+        if [[ -n "$_pp" && "$_pp" != "80" && "$_pp" != "443" && "$_pp" != "8443" ]]; then
+            EXTRA_TCP+=("$_pp")
+            echo "  → liberando ${_pp} (painel do GWOS)"
+        fi
+    fi
+    if [[ -e /etc/gwos/modulos.d/proxy-squid ]]; then
+        EXTRA_TCP+=(3127 3128 3129)
+        echo "  → liberando 3127-3129 (proxy Squid)"
+    fi
+fi
+
+# =============================================================================
 # DADOS PRÉVIOS NOS DISCOS — autorização explícita de formatação
 # A role storage só formata discos com assinaturas de instalação anterior
 # se raid.confirmo_formatacao for true; discos em branco não precisam.
@@ -566,6 +603,11 @@ raid:
   # Autoriza formatar discos com dados de instalação anterior (gravado pelo
   # bootstrap após confirmação; a role storage exige true para formatar)
   confirmo_formatacao: ${CONFIRMO_FORMATACAO}
+
+# Portas de outros sistemas nesta máquina (política do firewall é DROP)
+firewall:
+  extra_tcp: [$(IFS=', '; echo "${EXTRA_TCP[*]:-}")]
+  extra_udp: [$(IFS=', '; echo "${EXTRA_UDP[*]:-}")]
   mount:   /mnt/raid
   device:  /dev/md0
   devices:

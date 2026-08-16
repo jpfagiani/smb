@@ -74,6 +74,19 @@ table inet cdpni {
         # ── Portal (80/443) e painel admin (8443) ────────────────────────────
         tcp dport $WEB_PORTS ip saddr @redes_internas accept
 
+        # ── Serviços de OUTROS sistemas nesta máquina ────────────────────────
+        # A política é drop: tudo que não estiver aqui é descartado em silêncio.
+        # Numa máquina compartilhada (GWOS servindo DNS e hora, portal de
+        # sistemas na 80), sem estas regras os serviços somem da rede sem erro
+        # nenhum — o único sintoma é "parou de funcionar depois que instalei o
+        # Samba". Preenchido pelo bootstrap ao detectar o que já existe.
+{% for _p in firewall.extra_tcp | default([]) %}
+        tcp dport {{ _p }} ip saddr @redes_internas accept
+{% endfor %}
+{% for _p in firewall.extra_udp | default([]) %}
+        udp dport {{ _p }} ip saddr @redes_internas accept
+{% endfor %}
+
         # ── Flask interno ─────────────────────────────────────────────────────
         # Porta 5000 acessível apenas localmente (nginx faz o proxy para 443)
         tcp dport $FLASK_PORT ip saddr 127.0.0.1 accept
