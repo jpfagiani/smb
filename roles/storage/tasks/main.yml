@@ -273,12 +273,29 @@
       RAID="{{ raid.device }}"
       # Modo disco único (sem RAID): nada a monitorar — sai sem alertas falsos
       [ -b "$RAID" ] || exit 0
-      STATE=$(mdadm --detail "$RAID" 2>/dev/null | awk '/State :/{print $3}')
-      FAILED=$(mdadm --detail "$RAID" 2>/dev/null | awk '/Failed Devices/{print $4}')
+      DETALHE=$(mdadm --detail "$RAID" 2>/dev/null)
+      # A linha é "State : clean, degraded, recovering" — pega tudo depois dos
+      # dois-pontos. O 'awk {print $3}' anterior devolvia só "clean," (com a
+      # vírgula), que nunca casa com "clean": qualquer estado composto virava
+      # alerta, e a mensagem saía truncada, sem dizer o que havia de errado.
+      STATE=$(echo "$DETALHE" | sed -n 's/^[[:space:]]*State :[[:space:]]*//p' | sed 's/[[:space:]]*$//')
+      FAILED=$(echo "$DETALHE" | awk '/Failed Devices/{print $4}')
       FAILED=${FAILED:-0}
+
+      # Reconstrução em andamento não é defeito. Logo depois de criar o array
+      # o sync inicial dura horas, e a verificação roda de hora em hora —
+      # alertar aqui encheria a caixa do root justamente quando está tudo bem.
+      EM_ANDAMENTO=0
+      case "$STATE" in
+          *resyncing*|*recovering*|*reshaping*|*checking*) EM_ANDAMENTO=1 ;;
+      esac
+
       MSG=""
       [[ "$FAILED" -gt 0 ]] && MSG+="DISCO FALHO (${FAILED})! "
-      [[ "$STATE" != "clean" && "$STATE" != "active" ]] && MSG+="Estado: ${STATE}. "
+      if [[ $EM_ANDAMENTO -eq 1 ]]; then
+          echo "$(date): em andamento — ${STATE}" >> /var/log/raid_check.log
+      elif [[ "$STATE" != "clean" && "$STATE" != "active" ]]; then
+          MSG+="Estado: ${STATE}. "
       if [[ -n "$MSG" ]]; then
           echo "$MSG" | mail -s "RAID ALERT $(hostname)" root 2>/dev/null || true
           echo "$(date): $MSG" >> /var/log/raid_alert.log
