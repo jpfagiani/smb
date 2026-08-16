@@ -84,6 +84,32 @@
   failed_when: false
   changed_when: false
 
+# Reaproveitar o RAID e' o caminho normal numa reinstalacao, mas ate agora
+# isso acontecia em silencio: o operador nao tinha como distinguir "achou o
+# array antigo e preservou" de "formatou tudo e o RAID esta vazio de novo".
+- name: Levantar o que há no RAID reaproveitado
+  ansible.builtin.shell: |
+    dev=$(findmnt -n -o SOURCE {{ raid.mount }})
+    uso=$(df -h --output=size,used,avail {{ raid.mount }} | tail -1 | tr -s ' ')
+    arq=$(find {{ raid.mount }}/shares -type f 2>/dev/null | wc -l)
+    dirs=$(find {{ raid.mount }}/shares -maxdepth 1 -mindepth 1 -type d 2>/dev/null | wc -l)
+    echo "${dev}|${uso}|${arq}|${dirs}"
+  register: raid_conteudo
+  when: raid_montado.rc == 0
+  changed_when: false
+  failed_when: false
+
+- name: Confirmar que os dados existentes foram preservados
+  ansible.builtin.debug:
+    msg:
+      - "RAID EXISTENTE REAPROVEITADO — nada foi formatado."
+      - "  Dispositivo   : {{ (raid_conteudo.stdout | split('|'))[0] }}"
+      - "  Tamanho/uso   : {{ (raid_conteudo.stdout | split('|'))[1] }} (total, usado, livre)"
+      - "  Pastas em shares : {{ (raid_conteudo.stdout | split('|'))[3] }}"
+      - "  Arquivos      : {{ (raid_conteudo.stdout | split('|'))[2] }}"
+      - "O Samba sera instalado por cima destes dados."
+  when: raid_montado.rc == 0 and raid_conteudo.stdout is defined and '|' in raid_conteudo.stdout
+
 # Última linha de defesa antes do caminho destrutivo: discos com restos de
 # uma instalação anterior só são formatados com autorização explícita.
 - name: Detectar assinaturas de dados nos discos selecionados
