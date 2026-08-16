@@ -333,20 +333,28 @@ done
 # sincronizar consigo próprio e distribuir a hora errada para a LAN inteira.
 _NTP_SUG="10.14.8.20"
 if [[ -f /etc/gwos/gwos.conf ]]; then
-    _ntp_gwos=$(awk -F= '/^NTP_SERVIDORES=/{print $2}' /etc/gwos/gwos.conf 2>/dev/null                 | tr -d '"' | tr -d ' ' | cut -d, -f1)
+    # NTP_SERVIDORES pode trazer vários, separados por espaço. Pega o primeiro
+    # sem colar um no outro — um 'tr -d " "' aqui produziria "10.14.8.2010.1.6.222".
+    _ntp_gwos=$(awk -F= '/^NTP_SERVIDORES=/{gsub(/"/,"",$2); print $2}'                 /etc/gwos/gwos.conf 2>/dev/null | awk '{print $1}')
     [[ -n "$_ntp_gwos" ]] && _NTP_SUG="$_ntp_gwos"
 fi
-if [[ -e /etc/gwos/modulos.d/hora-chrony ]]; then
-    info "O GWOS já gerencia o chrony aqui — este valor fica só registrado."
-    info "Para trocar a fonte: gwos-definir NTP_SERVIDORES <ip> && gwos-integrar"
-fi
 
-while true; do
-    ask "Servidor NTP [${_NTP_SUG}]:"
-    read -rp "  > " _IN; NTP="${_IN:-$_NTP_SUG}"
-    valid_ip "$NTP" && break
-    warn "IP inválido"
-done
+if [[ -e /etc/gwos/modulos.d/hora-chrony ]]; then
+    # Nem pergunta. O módulo hora-chrony do GWOS é o dono do chrony aqui, e a
+    # role common não sobrescreve o chrony.conf quando ele está presente — a
+    # resposta iria para o all.yml e nunca seria aplicada. Perguntar um valor
+    # que se descarta é pior que não perguntar: parece ter efeito.
+    NTP="$_NTP_SUG"
+    info "Hora: já gerenciada pelo GWOS (fonte ${NTP}) — não perguntado."
+    info "Para trocar: gwos-definir NTP_SERVIDORES <ip> && gwos-integrar"
+else
+    while true; do
+        ask "Servidor NTP [${_NTP_SUG}]:"
+        read -rp "  > " _IN; NTP="${_IN:-$_NTP_SUG}"
+        valid_ip "$NTP" && break
+        warn "IP inválido"
+    done
+fi
 
 # Hostname
 while true; do
