@@ -449,8 +449,11 @@ if [[ -d /etc/gwos/modulos.d ]]; then
         echo "  → liberando 123 (NTP)"
     fi
     if [[ -e /etc/gwos/modulos.d/painel-web ]]; then
+        # Convenção do projeto: 80 sistemas, 8080 gateway, 8443 samba.
+        # 80/443/8443 já estão em WEB_PORTS; só a do gateway precisa entrar.
         _pp=$(awk -F= '/^PAINEL_PORTA=/{print $2}' /etc/gwos/gwos.conf 2>/dev/null | tr -d ' ')
-        if [[ -n "$_pp" && "$_pp" != "80" && "$_pp" != "443" && "$_pp" != "8443" ]]; then
+        _pp="${_pp:-8080}"
+        if [[ "$_pp" != "80" && "$_pp" != "443" && "$_pp" != "8443" ]]; then
             EXTRA_TCP+=("$_pp")
             echo "  → liberando ${_pp} (painel do GWOS)"
         fi

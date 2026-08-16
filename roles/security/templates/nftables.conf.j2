@@ -10,7 +10,10 @@ define SSH_PORT   = 22
 define SMB_PORTS  = { 139, 445 }   # SMB/CIFS (TCP)
 define NB_PORTS   = { 137, 138 }   # NetBIOS (UDP) — resolução de nomes Windows
 define MDNS_PORT  = 5353           # mDNS/Avahi (UDP) — nomes .local sem DNS
-define WEB_PORTS  = { 80, 443, 8443 }  # Portal (80→443) + painel admin (8443)
+# Convenção de portas do projeto, igual em todas as unidades:
+#   80    portal-sistemas (atalhos)   8080  portal-gateway (GWOS)
+#   8443  portal-samba (este)         443   redirecionamento HTTPS
+define WEB_PORTS  = { 80, 443, 8443 }
 define FLASK_PORT = 5000           # Flask interno — apenas loopback
 
 table inet cdpni {
