@@ -147,7 +147,11 @@ ok "Interface selecionada: ${SERVER_IFACE}  (IP atual: ${_BEST_IP:-não configur
 if [[ -n "${_BEST_IP:-}" ]]; then
     _IP_SUG="$_BEST_IP"
 else
-    _IP_SUG="10.14.29.11"
+    # Sem IP detectado, a sugestão é propositalmente INVÁLIDA. Um número
+    # concreto aqui seria aceito com um Enter distraído e o servidor subiria
+    # num endereço que ninguém escolheu; com o X, a validação recusa e o
+    # script pergunta de novo.
+    _IP_SUG="10.14.29.X"
     _BEST_MASK="24"
 fi
 
@@ -254,7 +258,11 @@ while true; do
     ask "IP fixo do servidor [${_IP_SUG}]:"
     read -rp "  > " _IN; SAMBA_IP="${_IN:-$_IP_SUG}"
     if ! valid_ip "$SAMBA_IP"; then
-        warn "IP inválido"
+        if [[ "$SAMBA_IP" == *[Xx]* ]]; then
+            warn "Troque o X pelo número deste servidor na rede (ex.: 10.14.29.11)."
+        else
+            warn "IP inválido"
+        fi
         continue
     fi
     # Confirmação extra só quando a troca de fato desincroniza o GWOS
@@ -321,7 +329,7 @@ read -rp "  > " _IN; DOMAIN="${_IN:-cdpni.local}"
 # Identidade da unidade (aparece no portal web e no certificado SSL)
 _ORG_RE='^[A-Za-z0-9][A-Za-z0-9 ._-]{0,29}$'
 while true; do
-    ask "Sigla da unidade (ex: CDPNI, PLAVII) [CDPNI]:"
+    ask "Sigla da unidade [CDPNI]:"
     read -rp "  > " _IN; ORG_SIGLA="${_IN:-CDPNI}"
     [[ "$ORG_SIGLA" =~ $_ORG_RE ]] && break
     warn "Sigla inválida (letras, dígitos, espaço, . _ -; até 30 caracteres)"

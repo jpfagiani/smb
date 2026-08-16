@@ -6,7 +6,7 @@
 # =============================================================================
 
 # Identidade da unidade — exibida no portal web e no certificado SSL.
-# Para instalar em outra unidade (ex.: PLAVII), o bootstrap pergunta
+# Para instalar em outra unidade, o bootstrap pergunta
 # estes valores; nomes técnicos internos (serviço smb-portal, paths)
 # não mudam e não precisam mudar.
 org:

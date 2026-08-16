@@ -60,7 +60,7 @@ O instalador é interativo. O que cada pergunta significa:
 | **Servidor NTP** | Fonte de hora da intranet — padrão `10.14.8.20` (GPU). Hora errada quebra o apt e bagunça os logs |
 | **Nome do servidor** | Ex.: `smb` — vira o endereço `smb.dominio` |
 | **Domínio local** | Ex.: `cdpni.local` |
-| **Sigla da unidade** | Ex.: `CDPNI`, `PLAVII` — aparece no portal e no certificado |
+| **Sigla da unidade** | Ex.: `CDPNI` — aparece no portal e no certificado |
 | **Nome por extenso** | Ex.: `Centro de Detenção Provisória de Nova Independência` |
 | **Login do administrador** | Usuário com acesso total (padrão `sambadmin`) |
 | **Senha padrão dos usuários Samba** | Senha inicial de todos os usuários (cada um troca depois no portal) |
@@ -293,6 +293,6 @@ cp /opt/smb/group_vars/all.yml /root/all.yml.bak
 
 ---
 
-## 6. Instalando em outra unidade (ex.: PLAVII)
+## 6. Instalando em outra unidade
 
 O sistema é genérico: rode o `bootstrap.sh` na máquina nova e responda com os dados da unidade (IP, hostname, domínio, sigla e nome por extenso). Tudo — portal, certificado, rede — se adapta às respostas. Nada precisa ser editado no código.
