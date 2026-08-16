@@ -1,6 +1,6 @@
 #!/bin/bash
 # Detecta o IP atual da interface e atualiza config.py, nginx e certificado SSL.
-# Executado automaticamente pelo cdpni-update-ip.service a cada boot.
+# Executado automaticamente pelo smb-update-ip.service a cada boot.
 
 IFACE="{{ server.iface }}"
 PORTAL_DIR="{{ portal.dir }}"
@@ -15,7 +15,7 @@ IP_CACHE="$PORTAL_DIR/.last_ip"
 CURRENT_IP=$(ip -4 addr show "$IFACE" 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
 
 if [[ -z "$CURRENT_IP" ]]; then
-    echo "cdpni-update-ip: nenhum IP encontrado em $IFACE, abortando." >&2
+    echo "smb-update-ip: nenhum IP encontrado em $IFACE, abortando." >&2
     exit 1
 fi
 
@@ -23,11 +23,11 @@ fi
 LAST_IP=$(cat "$IP_CACHE" 2>/dev/null || echo "")
 
 if [[ "$CURRENT_IP" == "$LAST_IP" ]]; then
-    echo "cdpni-update-ip: IP $CURRENT_IP nao mudou, nenhuma acao necessaria."
+    echo "smb-update-ip: IP $CURRENT_IP nao mudou, nenhuma acao necessaria."
     exit 0
 fi
 
-echo "cdpni-update-ip: IP mudou de '$LAST_IP' para '$CURRENT_IP' — atualizando..."
+echo "smb-update-ip: IP mudou de '$LAST_IP' para '$CURRENT_IP' — atualizando..."
 
 # 1. Atualiza config.py do portal
 if [[ -f "$PORTAL_DIR/config.py" ]]; then
@@ -66,4 +66,4 @@ fi
 # o que sabotava qualquer recuperação manual da rede)
 chattr -i /etc/resolv.conf 2>/dev/null || true
 
-echo "cdpni-update-ip: concluido (IP=$CURRENT_IP)"
+echo "smb-update-ip: concluido (IP=$CURRENT_IP)"

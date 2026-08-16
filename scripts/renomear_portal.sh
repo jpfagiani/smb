@@ -100,9 +100,12 @@ fi
 # ---------------------------------------------------------------------------
 # 4. Logs
 # ---------------------------------------------------------------------------
+# 'A && B' com A falso devolve 1 e, sob set -e, mataria o script aqui —
+# um log que ainda não existe não é erro.
 for tipo in access error; do
-    [ -f "/var/log/${LOG_ANTIGO}_${tipo}.log" ] && \
+    if [ -f "/var/log/${LOG_ANTIGO}_${tipo}.log" ]; then
         mv "/var/log/${LOG_ANTIGO}_${tipo}.log" "/var/log/${LOG_NOVO}_${tipo}.log"
+    fi
 done
 ok "Logs renomeados."
 
@@ -146,6 +149,21 @@ else
 fi
 
 systemctl restart fail2ban 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# 7. Serviço auxiliar de IP — segue a mesma convenção <servidor>-*
+# ---------------------------------------------------------------------------
+if [ -e /etc/systemd/system/cdpni-update-ip.service ]    && [ ! -e /etc/systemd/system/smb-update-ip.service ]; then
+    systemctl disable --now cdpni-update-ip.service 2>/dev/null || true
+    mv /etc/systemd/system/cdpni-update-ip.service /etc/systemd/system/smb-update-ip.service
+    if [ -e /usr/local/bin/cdpni-update-ip.sh ]; then
+        mv /usr/local/bin/cdpni-update-ip.sh /usr/local/bin/smb-update-ip.sh
+    fi
+    sed -i "s|cdpni-update-ip|smb-update-ip|g"         /etc/systemd/system/smb-update-ip.service /usr/local/bin/smb-update-ip.sh 2>/dev/null || true
+    systemctl daemon-reload
+    systemctl enable smb-update-ip.service 2>/dev/null || true
+    ok "cdpni-update-ip → smb-update-ip"
+fi
 
 echo ""
 ok "Migração concluída."

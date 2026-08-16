@@ -101,6 +101,8 @@ rm -rf /etc/nginx/ssl /etc/ssl/cdpni
 
 # Systemd
 rm -f /etc/systemd/system/smb-portal.service /etc/systemd/system/cdpni-portal.service
+rm -f /etc/systemd/system/smb-update-ip.service /etc/systemd/system/cdpni-update-ip.service
+rm -f /usr/local/bin/smb-update-ip.sh /usr/local/bin/cdpni-update-ip.sh
 
 # Sudoers
 # Nome atual e o anterior — remover só um deixaria unidade, site e jail órfãos.

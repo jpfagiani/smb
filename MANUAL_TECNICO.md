@@ -41,7 +41,7 @@ instalação, a máquina já está protegida.
 | Anti-brute-force | `fail2ban` | — | Bane IPs após erros de login |
 | Hora | `chrony` | 123/udp (cliente) | Sincroniza com o NTP institucional |
 | Auditoria | `rsyslog` | — | Grava o log de acessos do Samba em arquivo |
-| Ajuste de IP no boot | `cdpni-update-ip` | — | Oneshot: atualiza config/nginx/SSL se o IP mudou |
+| Ajuste de IP no boot | `smb-update-ip` | — | Oneshot: atualiza config/nginx/SSL se o IP mudou |
 
 ### 1.3 Caminhos importantes
 
@@ -589,8 +589,8 @@ fail2ban não traz filtro para Samba e o log por máquina não tem caminho fixo.
 ```ini
 [Unit]
 Description=CDPNI Portal Flask
-After=network.target smbd.service cdpni-update-ip.service
-Wants=cdpni-update-ip.service     # start do portal puxa o ajustador de IP antes
+After=network.target smbd.service smb-update-ip.service
+Wants=smb-update-ip.service     # start do portal puxa o ajustador de IP antes
 
 [Service]
 User=cdpni                        # NÃO roda como root — privilégios só via sudo pontual

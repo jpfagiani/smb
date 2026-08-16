@@ -6,7 +6,7 @@ Before=nginx.service {{ portal.nome }}.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/cdpni-update-ip.sh
+ExecStart=/usr/local/bin/smb-update-ip.sh
 RemainAfterExit=yes
 # Nunca segurar o boot/instalação por mais de 60s, aconteça o que for
 TimeoutStartSec=60
