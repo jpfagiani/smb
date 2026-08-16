@@ -12,13 +12,37 @@
   changed_when: false
 
 
+# Os dois projetos escrevem /etc/nftables.conf. O modulo 40 do GWOS poe ali
+# o NAT (masquerade), o redirecionamento para o Squid e o forcamento do DNS
+# da LAN — coisas sem as quais um gateway deixa de rotear e de filtrar.
+# Sobrescrever aqui apagaria tudo isso de uma vez, e como a ordem
+# recomendada de instalacao e GWOS -> smb, seria SEMPRE o GWOS a perder.
+#
+# Quando o modulo de firewall do GWOS esta presente, ele e o dono. As portas
+# do Samba continuam alcancaveis: o ruleset do GWOS tem 'iif <LAN> accept'
+# para todo o trafego da rede interna.
+- name: Verificar se o GWOS já gerencia o nftables
+  ansible.builtin.stat:
+    path: /etc/gwos/modulos.d/firewall-nftables
+  register: gwos_firewall
+
 - name: Implantar ruleset nftables (validado com nft -c antes de instalar)
   ansible.builtin.template:
     src: nftables.conf.j2
     dest: /etc/nftables.conf
     mode: "0640"
     validate: /usr/sbin/nft -c -f %s
+  when: not gwos_firewall.stat.exists
   notify: reload nftables
+
+- name: Informar que o firewall pertence ao GWOS
+  ansible.builtin.debug:
+    msg: >-
+      O modulo 40-firewall-nftables do GWOS gerencia /etc/nftables.conf nesta
+      maquina — ruleset preservado (NAT, redirecionamento do Squid e DNS da
+      LAN dependem dele). As portas do Samba ficam liberadas pela regra
+      'iif <LAN> accept'. Para regerar: sudo gwos-gerar-nftables
+  when: gwos_firewall.stat.exists
 
 - name: Habilitar e iniciar nftables
   ansible.builtin.service:
