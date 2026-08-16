@@ -327,10 +327,23 @@ while true; do
     warn "IP inválido"
 done
 
-# NTP — na intranet a fonte de hora é o servidor institucional (GPU)
+# NTP — a fonte de hora da intranet. Diferente do DNS: aqui NÃO cabe
+# 127.0.0.1. O chrony desta máquina é o servidor de hora, e um servidor de
+# hora precisa de uma fonte externa — apontá-lo para si mesmo o faria
+# sincronizar consigo próprio e distribuir a hora errada para a LAN inteira.
+_NTP_SUG="10.14.8.20"
+if [[ -f /etc/gwos/gwos.conf ]]; then
+    _ntp_gwos=$(awk -F= '/^NTP_SERVIDORES=/{print $2}' /etc/gwos/gwos.conf 2>/dev/null                 | tr -d '"' | tr -d ' ' | cut -d, -f1)
+    [[ -n "$_ntp_gwos" ]] && _NTP_SUG="$_ntp_gwos"
+fi
+if [[ -e /etc/gwos/modulos.d/hora-chrony ]]; then
+    info "O GWOS já gerencia o chrony aqui — este valor fica só registrado."
+    info "Para trocar a fonte: gwos-definir NTP_SERVIDORES <ip> && gwos-integrar"
+fi
+
 while true; do
-    ask "Servidor NTP [10.14.8.20]:"
-    read -rp "  > " _IN; NTP="${_IN:-10.14.8.20}"
+    ask "Servidor NTP [${_NTP_SUG}]:"
+    read -rp "  > " _IN; NTP="${_IN:-$_NTP_SUG}"
     valid_ip "$NTP" && break
     warn "IP inválido"
 done
