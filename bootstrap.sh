@@ -303,8 +303,29 @@ while true; do
 done
 
 # DNS
-ask "DNS (Enter = gateway) [${GATEWAY}]:"
-read -rp "  > " _IN; DNS="${_IN:-$GATEWAY}"
+# Este valor vai direto para o /etc/resolv.conf DESTA máquina, e é o único
+# resolver que ela terá. Quando o BIND9 do GWOS já está aqui, o resolver certo
+# é ele mesmo: apontar para o gateway sobrescreveria o resolv.conf que o GWOS
+# deixou correto, e o servidor perderia os nomes internos do domínio — até
+# para resolver a si próprio.
+#
+# 127.0.0.1 e não o IP da LAN, mesmo sendo o mesmo BIND9: é a linha que o
+# módulo 20-dns-bind9 confere na verificação, e continua valendo se a máquina
+# um dia trocar de IP.
+if [[ -e /etc/gwos/modulos.d/dns-bind9 ]]    || systemctl is-active --quiet named 2>/dev/null    || systemctl is-active --quiet bind9 2>/dev/null; then
+    _DNS_SUG="127.0.0.1"
+    info "BIND9 do GWOS detectado nesta máquina — o padrão do DNS é 127.0.0.1."
+    info "Ele resolve o domínio interno e encaminha o resto para fora."
+else
+    _DNS_SUG="$GATEWAY"
+fi
+
+while true; do
+    ask "DNS [${_DNS_SUG}]:"
+    read -rp "  > " _IN; DNS="${_IN:-$_DNS_SUG}"
+    valid_ip "$DNS" && break
+    warn "IP inválido"
+done
 
 # NTP — na intranet a fonte de hora é o servidor institucional (GPU)
 while true; do
