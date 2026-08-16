@@ -135,15 +135,29 @@ fi
 
 ok "Interface selecionada: ${SERVER_IFACE}  (IP atual: ${_BEST_IP:-não configurado})"
 
-# Sugestão de IP para o servidor (.11 na mesma sub-rede)
-# Rede padrão CDPNI: 10.14.29.0/24 (faixas alternativas: 172.14.29.0/24
-# e 192.14.29.0/24 — já liberadas no firewall via network_ranges)
+# Sugestão de IP: o que a máquina JÁ USA.
+#
+# Antes sugeria .11 na mesma sub-rede, descartando o último octeto do IP
+# detectado. Numa máquina que já estava configurada e funcionando, isso
+# propunha trocar o endereço sem que ninguém tivesse pedido — e aceitar o
+# padrão sem ler derrubava a rede do servidor.
+#
+# O .11 continua como sugestão apenas quando não há IP nenhum (instalação
+# do zero na rede padrão da unidade).
 if [[ -n "${_BEST_IP:-}" ]]; then
-    _NET_PFX="${_BEST_IP%.*}"
-    _IP_SUG="${_NET_PFX}.11"
+    _IP_SUG="$_BEST_IP"
 else
     _IP_SUG="10.14.29.11"
     _BEST_MASK="24"
+fi
+
+# Esta máquina hospeda algum serviço do GWOS (DNS, hora, proxy, painel)?
+# Trocar o IP aqui deixaria o estado do GWOS e os nomes internos que apontam
+# para ele desatualizados — e sem erro nenhum na hora.
+GWOS_PRESENTE=0
+if [[ -f /etc/gwos/gwos.conf ]]; then
+    GWOS_PRESENTE=1
+    GWOS_MODULOS_AQUI=$(ls /etc/gwos/modulos.d/ 2>/dev/null | paste -sd ', ' -)
 fi
 
 # =============================================================================
@@ -221,11 +235,36 @@ valid_pass() {
 }
 
 # IP do servidor
+if [[ $GWOS_PRESENTE -eq 1 ]]; then
+    echo ""
+    warn "Esta máquina já hospeda serviços do GWOS: ${GWOS_MODULOS_AQUI:-?}"
+    echo "  Trocar o IP aqui NÃO atualiza o GWOS: o /etc/gwos/gwos.conf, os"
+    echo "  nomes internos do DNS e as máquinas da rede continuariam apontando"
+    echo "  para o endereço antigo."
+    echo ""
+    echo "  Se precisar mesmo mudar, o caminho certo é depois desta instalação:"
+    echo "    sudo gwos ip <novo_ip>"
+    echo "  — ele valida, faz backup e recarrega DNS, proxy e firewall juntos."
+    echo ""
+    echo "  Mantenha ${_IP_SUG} (Enter) a menos que saiba o que está fazendo."
+    echo ""
+fi
+
 while true; do
     ask "IP fixo do servidor [${_IP_SUG}]:"
     read -rp "  > " _IN; SAMBA_IP="${_IN:-$_IP_SUG}"
-    valid_ip "$SAMBA_IP" && break
-    warn "IP inválido"
+    if ! valid_ip "$SAMBA_IP"; then
+        warn "IP inválido"
+        continue
+    fi
+    # Confirmação extra só quando a troca de fato desincroniza o GWOS
+    if [[ $GWOS_PRESENTE -eq 1 && -n "${_BEST_IP:-}" && "$SAMBA_IP" != "$_BEST_IP" ]]; then
+        warn "Você está trocando ${_BEST_IP} por ${SAMBA_IP} numa máquina com GWOS."
+        read -rp "  Confirma a troca? [s/N]: " _CONF
+        [[ "${_CONF:-N}" =~ ^[Ss]$ ]] || continue
+        echo "  Lembre-se de rodar depois:  sudo gwos ip ${SAMBA_IP}"
+    fi
+    break
 done
 
 # Máscara

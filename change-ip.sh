@@ -83,6 +83,15 @@ echo ""
 echo -e "  Servidor    : ${BOLD}${HOSTNAME}.${DOMAIN}${NC}"
 echo -e "  IP atual    : ${YELLOW}${IP_ATUAL}/${MASK_ATUAL}${NC}  (gw ${GW_ATUAL}, dns ${DNS_ATUAL}, ${IFACE_ATUAL})"
 
+# GWOS na MESMA máquina: o aviso do fim do script fala do gateway remoto, mas
+# se os serviços estiverem aqui, o estado local também sai de sincronia.
+if [ -f /etc/gwos/gwos.conf ]; then
+    echo ""
+    warn "Esta máquina também hospeda serviços do GWOS."
+    echo  "  Depois de trocar o IP aqui, rode:  sudo gwos ip ${NOVO_IP:-<novo_ip>}"
+    echo  "  Sem isso, o DNS e o firewall do GWOS continuam com o endereço antigo."
+fi
+
 # ── Novo IP ───────────────────────────────────────────────────────────────────
 if [[ -z "$NOVO_IP" ]]; then
     while true; do
