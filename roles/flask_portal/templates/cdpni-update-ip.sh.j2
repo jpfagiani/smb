@@ -4,7 +4,7 @@
 
 IFACE="{{ server.iface }}"
 PORTAL_DIR="{{ portal.dir }}"
-NGINX_CONF="/etc/nginx/sites-available/cdpni-portal"
+NGINX_CONF="/etc/nginx/sites-available/{{ portal.nome }}"
 SSL_CERT="{{ ssl.cert }}"
 SSL_KEY="{{ ssl.key }}"
 HOSTNAME="{{ server.hostname }}"

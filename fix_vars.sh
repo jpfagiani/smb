@@ -49,7 +49,8 @@ add_if_missing "samba" "samba:
   log_dir:      /var/log/samba"
 
 add_if_missing "portal" "portal:
-  dir:  /opt/cdpni-portal
+  nome: smb-portal
+  dir:  /opt/smb-portal
   user: cdpni
   port: 5000"
 

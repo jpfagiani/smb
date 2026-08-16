@@ -2,7 +2,7 @@
 Description=CDPNI — Atualiza IP dinamico (config, nginx, SSL)
 After=network-online.target
 Wants=network-online.target
-Before=nginx.service cdpni-portal.service
+Before=nginx.service {{ portal.nome }}.service
 
 [Service]
 Type=oneshot

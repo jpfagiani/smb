@@ -1,5 +1,10 @@
 # Portal CDPNI — gerado pelo Ansible
 SAMBA_ROOT  = '{{ raid.mount }}/shares'
+# Nome do portal e serviço PAM correspondente (/etc/pam.d/<nome>). Vêm do
+# Ansible para que renomear o portal não exija editar o app.py — se estes
+# dois divergirem do arquivo em /etc/pam.d, ninguém consegue entrar.
+PORTAL_NAME = '{{ portal.nome }}'
+PAM_SERVICE = '{{ portal.nome }}'
 # Só o admin do servidor é administrador do portal por padrão. Os demais
 # são promovidos pelo painel (botão "Tornar Admin" → grupo cdpni-admins);
 # não fixe outros aqui, senão o painel não consegue rebaixá-los.

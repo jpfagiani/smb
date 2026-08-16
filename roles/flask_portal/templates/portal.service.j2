@@ -21,8 +21,8 @@ ExecStart={{ portal.dir }}/venv/bin/gunicorn \
     --workers 3 \
     --bind 127.0.0.1:{{ portal.port }} \
     --timeout 120 \
-    --access-logfile /var/log/cdpni_portal_access.log \
-    --error-logfile  /var/log/cdpni_portal_error.log \
+    --access-logfile /var/log/{{ portal.nome | replace('-','_') }}_access.log \
+    --error-logfile  /var/log/{{ portal.nome | replace('-','_') }}_error.log \
     app:app
 Restart=on-failure
 RestartSec=5

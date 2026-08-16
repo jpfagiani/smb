@@ -7,7 +7,7 @@
 
 # Identidade da unidade — exibida no portal web e no certificado SSL.
 # Para instalar em outra unidade (ex.: PLAVII), o bootstrap pergunta
-# estes valores; nomes técnicos internos (serviço cdpni-portal, paths)
+# estes valores; nomes técnicos internos (serviço smb-portal, paths)
 # não mudam e não precisam mudar.
 org:
   name:     "CDPNI"
@@ -71,7 +71,12 @@ samba:
   extra_admins: []
 
 portal:
-  dir:  /opt/cdpni-portal
+  # Nome do portal. Convenção <servidor>-portal: amarra o portal ao servidor
+  # que o hospeda. Daqui saem a unidade systemd, o site do nginx, o serviço
+  # PAM, o sudoers, a jail do fail2ban e os arquivos de log.
+  # Ao trocar, rode scripts/renomear_portal.sh para migrar o que já existe.
+  nome: smb-portal
+  dir:  /opt/smb-portal      # mantenha igual a /opt/<nome>
   user: cdpni
   port: 5000
 

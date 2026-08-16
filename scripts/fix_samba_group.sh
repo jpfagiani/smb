@@ -2,6 +2,14 @@
 # Adiciona force group em cada share do smb.conf para permitir escrita entre usuários
 set -e
 
+# Nome do portal — lido do group_vars para acompanhar a convenção
+# <servidor>-portal. Sem o arquivo, cai no padrão.
+PORTAL_NOME=$(awk '/^portal:/{p=1;next} p&&/^[a-z]/{p=0} p&&/nome:/{print $2;exit}' \
+              /opt/smb/group_vars/all.yml 2>/dev/null)
+PORTAL_NOME="${PORTAL_NOME:-smb-portal}"
+PORTAL_DIR="/opt/$PORTAL_NOME"
+
+
 if [[ $EUID -ne 0 ]]; then
     echo "Execute como root: sudo bash fix_samba_group.sh"
     exit 1
@@ -124,12 +132,12 @@ systemctl is-active smbd && echo "    OK: smbd ativo"
 echo ""
 echo "==> Atualizando portal e portal permissoes..."
 cd /opt/smb && git pull
-cp /opt/smb/roles/flask_portal/files/app.py /opt/cdpni-portal/app.py
-chown cdpni:cdpni /opt/cdpni-portal/app.py
-[ -f /opt/cdpni-portal/permissions.json ] || echo '{}' > /opt/cdpni-portal/permissions.json
-chown cdpni:cdpni /opt/cdpni-portal/permissions.json
-systemctl restart cdpni-portal
-systemctl is-active cdpni-portal && echo "    OK: cdpni-portal ativo"
+cp /opt/smb/roles/flask_portal/files/app.py $PORTAL_DIR/app.py
+chown cdpni:cdpni $PORTAL_DIR/app.py
+[ -f $PORTAL_DIR/permissions.json ] || echo '{}' > $PORTAL_DIR/permissions.json
+chown cdpni:cdpni $PORTAL_DIR/permissions.json
+systemctl restart "$PORTAL_NOME"
+systemctl is-active "$PORTAL_NOME" && echo "    OK: $PORTAL_NOME ativo"
 
 echo ""
 echo "Fix aplicado com sucesso."

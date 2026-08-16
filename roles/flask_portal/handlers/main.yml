@@ -5,7 +5,7 @@
 
   - name: restart portal
     ansible.builtin.service:
-      name: cdpni-portal
+      name: "{{ portal.nome }}"
       state: restarted
 
   - name: reload nginx

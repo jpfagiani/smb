@@ -74,7 +74,7 @@ Ao confirmar, a instalação roda sozinha (10–20 min). O RAID continua sincron
 
 ```bash
 # Todos devem aparecer "active (running)":
-systemctl status smbd nmbd nginx cdpni-portal nftables fail2ban --no-pager
+systemctl status smbd nmbd nginx smb-portal nftables fail2ban --no-pager
 
 # RAID montado e sincronizando:
 cat /proc/mdstat
@@ -281,10 +281,10 @@ cp /opt/smb/group_vars/all.yml /root/all.yml.bak
 
 | Sintoma | Causa provável | Solução |
 |---|---|---|
-| Portal não abre (502) | Serviço do portal parado | `systemctl restart cdpni-portal` |
+| Portal não abre (502) | Serviço do portal parado | `systemctl restart smb-portal` |
 | Portal não abre (timeout) | nginx parado ou firewall | `systemctl restart nginx` · confira se a máquina está numa rede permitida |
 | Usuário não acessa o share | Sem senha Samba ou senha errada | Portal → Usuários → Trocar senha |
-| "Conta bloqueada" ao errar senha no portal | fail2ban baniu o IP (5 erros/5 min) | Espere 30 min ou `fail2ban-client set cdpni-portal unbanip <IP>` |
+| "Conta bloqueada" ao errar senha no portal | fail2ban baniu o IP (5 erros/5 min) | Espere 30 min ou `fail2ban-client set smb-portal unbanip <IP>` |
 | `apt update` reclama de assinatura "Not live until" | Relógio atrasado | `chronyc makestep` e confira o NTP (`chronyc sources`) |
 | RAID degradado | Disco falhou | Manual técnico, seção "Substituir disco" |
 | Backup SMB falha na hora | Compartilhamento/senha errados | A mensagem do portal diz exatamente o quê; confira o compartilhamento no Windows |

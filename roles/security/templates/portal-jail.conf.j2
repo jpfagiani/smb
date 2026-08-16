@@ -1,8 +1,8 @@
-[cdpni-portal]
+[{{ portal.nome }}]
 enabled  = true
 port     = 443,80
-filter   = cdpni-portal
-logpath  = /var/log/cdpni_portal_access.log
+filter   = {{ portal.nome }}
+logpath  = /var/log/{{ portal.nome | replace('-','_') }}_access.log
 maxretry = 5
 bantime  = 1800
 findtime = 300

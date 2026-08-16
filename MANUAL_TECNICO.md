@@ -35,7 +35,7 @@ instalação, a máquina já está protegida.
 |---|---|---|---|
 | Samba (arquivos) | `smbd` | 445/tcp | SMB/CIFS — os compartilhamentos |
 | Samba (nomes) | `nmbd` | 137,138/udp | Resolução de nomes NetBIOS p/ Windows antigos |
-| Portal (aplicação) | `cdpni-portal` | 5000/tcp (só localhost) | Flask + gunicorn |
+| Portal (aplicação) | `smb-portal` | 5000/tcp (só localhost) | Flask + gunicorn |
 | Portal (HTTPS) | `nginx` | 8443/tcp | Proxy TLS na frente do gunicorn |
 | Firewall | `nftables` | — | Regras carregadas de `/etc/nftables.conf` |
 | Anti-brute-force | `fail2ban` | — | Bane IPs após erros de login |
@@ -51,7 +51,7 @@ instalação, a máquina já está protegida.
 | `/opt/smb/group_vars/all.yml` | **Configuração real** (fora do git!) — backup em `/root/all.yml.bak` |
 | `/mnt/raid/shares/<Share>` | Os arquivos de cada compartilhamento |
 | `/mnt/raid/recycle/<usuário>/<Share>/…` | Lixeira (vfs recycle) |
-| `/opt/cdpni-portal` | Aplicação do portal (app.py, config.py, venv) |
+| `/opt/smb-portal` | Aplicação do portal (app.py, config.py, venv) |
 | `/etc/samba/smb.conf` | Configuração do Samba (gerada — não editar na mão) |
 | `/etc/nftables.conf` | Regras de firewall (geradas) |
 | `/var/log/samba/audit.log` | Log de acessos a arquivos (full_audit) |
@@ -153,7 +153,7 @@ samba:
   extra_admins: []            # logins extras com bypass de permissão
 
 portal:
-  dir:  /opt/cdpni-portal     # onde a aplicação vive
+  dir:  /opt/smb-portal     # onde a aplicação vive
   user: cdpni                 # usuário de serviço (o portal NÃO roda como root)
   port: 5000                  # porta interna do gunicorn (nginx faz o TLS em 8443)
 ```
@@ -327,7 +327,7 @@ Preserva os dados migrando-os para um array degradado e depois espelhando
 de volta. Requer o disco novo (ex.: `/dev/sdb`) além do atual (ex.: `/dev/sdf`).
 
 ```bash
-systemctl stop smbd nmbd cdpni-portal          # libera o /mnt/raid
+systemctl stop smbd nmbd smb-portal          # libera o /mnt/raid
 
 # 1. Cria um RAID 1 DEGRADADO só com o disco NOVO (a 2ª perna fica "missing")
 mdadm --create /dev/md0 --level=1 --raid-devices=2 /dev/sdb missing --metadata=1.2
@@ -352,7 +352,7 @@ UUID=$(blkid -s UUID -o value /dev/md0)
 sed -i "\|/mnt/raid|d" /etc/fstab
 echo "UUID=$UUID  /mnt/raid  xfs  defaults,noatime,nodiratime,allocsize=64m,largeio  0  2" >> /etc/fstab
 
-systemctl start smbd nmbd cdpni-portal
+systemctl start smbd nmbd smb-portal
 ```
 
 Depois atualize o `group_vars/all.yml`: `raid.level: 1` e `raid.devices` com
@@ -570,12 +570,12 @@ systemctl reload nftables # reaplica o arquivo
 
 ```bash
 fail2ban-client status                      # jails ativas
-fail2ban-client status cdpni-portal        # IPs banidos na jail do portal
+fail2ban-client status smb-portal        # IPs banidos na jail do portal
 #   └─ regra: 5 logins errados em 5 min → banido por 30 min
-fail2ban-client set cdpni-portal unbanip 10.14.29.50   # desbanir na mão
+fail2ban-client set smb-portal unbanip 10.14.29.50   # desbanir na mão
 ```
 
-A jail lê `/var/log/cdpni_portal_access.log`: login que falha devolve HTTP 200
+A jail lê `/var/log/smb_portal_access.log`: login que falha devolve HTTP 200
 (com a mensagem de erro) e login certo devolve 302 (redirect) — o filtro conta
 os 200 do `POST /login`. A jail `samba` vem **desativada** de propósito: o
 fail2ban não traz filtro para Samba e o log por máquina não tem caminho fixo.
@@ -584,7 +584,7 @@ fail2ban não traz filtro para Samba e o log por máquina não tem caminho fixo.
 
 ## 8. O Portal por dentro
 
-### 8.1 Unit do systemd anotado (`cdpni-portal.service`)
+### 8.1 Unit do systemd anotado (`smb-portal.service`)
 
 ```ini
 [Unit]
@@ -594,8 +594,8 @@ Wants=cdpni-update-ip.service     # start do portal puxa o ajustador de IP antes
 
 [Service]
 User=cdpni                        # NÃO roda como root — privilégios só via sudo pontual
-WorkingDirectory=/opt/cdpni-portal
-ExecStart=/opt/cdpni-portal/venv/bin/gunicorn --workers 3 --bind 127.0.0.1:5000 \
+WorkingDirectory=/opt/smb-portal
+ExecStart=/opt/smb-portal/venv/bin/gunicorn --workers 3 --bind 127.0.0.1:5000 \
           --timeout 120 app:app
 #         │                        │            │
 #         │                        │            └─ só escuta no localhost (o nginx
@@ -707,7 +707,7 @@ baixo (tudo logado em `/var/log/cdpni_restore.log`):
 
 ```bash
 # 1. Snapshot de segurança das configurações ATUAIS (o "desfazer") — entra no histórico
-tar -czf /opt/backups/pre_restore_<data>.tar.gz -C / etc/samba etc/passwd etc/shadow etc/group var/lib/samba opt/cdpni-portal
+tar -czf /opt/backups/pre_restore_<data>.tar.gz -C / etc/samba etc/passwd etc/shadow etc/group var/lib/samba opt/smb-portal
 
 # 2. Samba parado enquanto config/banco são trocados (evita tdb corrompido)
 systemctl stop smbd nmbd
@@ -719,13 +719,13 @@ tar -xzf backup_X.tar.gz -C / etc/samba          # um tar -x por item;
 # 4. Validação e volta
 testparm -s        # confere o smb.conf restaurado antes de subir o Samba
 systemctl start smbd nmbd
-# (se "Portal" foi marcado: systemctl restart cdpni-portal por último —
+# (se "Portal" foi marcado: systemctl restart smb-portal por último —
 #  é ele quem está servindo a página)
 ```
 
 Itens do modal → caminhos: Configuração Samba = `etc/samba` · Banco do Samba
 (senhas/SID) = `var/lib/samba` · Usuários = `etc/passwd shadow group` ·
-Portal = `opt/cdpni-portal` · Compartilhamentos = `mnt/raid/shares` (sobrescreve
+Portal = `opt/smb-portal` · Compartilhamentos = `mnt/raid/shares` (sobrescreve
 com as versões do backup; arquivos criados depois permanecem).
 
 O card **⬆ Enviar Backup Externo** aceita um `.tar.gz` de fora do servidor
@@ -766,7 +766,7 @@ systemctl status <serviço> --no-pager   # estado, PID, últimas linhas de log
 systemctl restart <serviço>             # reinicia
 systemctl list-jobs                     # jobs travados/pendentes do systemd
 
-journalctl -u cdpni-portal -n 50 --no-pager
+journalctl -u smb-portal -n 50 --no-pager
 #          │                └─ últimas 50 linhas
 #          └─ log de UM serviço (o journal guarda tudo)
 journalctl -u smbd --since "1 hour ago" # filtro por tempo
@@ -781,10 +781,10 @@ htop                                    # processos, CPU e memória (F10 sai)
 ### Roteiro de diagnóstico do portal
 
 ```bash
-systemctl status cdpni-portal nginx --no-pager   # os dois de pé?
+systemctl status smb-portal nginx --no-pager   # os dois de pé?
 ss -tlnp | grep -E '5000|8443'                   # gunicorn no 5000, nginx no 8443?
-journalctl -u cdpni-portal -n 30 --no-pager      # erro do Python aparece aqui
-tail -5 /var/log/cdpni_portal_error.log          # erro do gunicorn/aplicação
+journalctl -u smb-portal -n 30 --no-pager      # erro do Python aparece aqui
+tail -5 /var/log/smb_portal_error.log          # erro do gunicorn/aplicação
 nginx -t                                         # config do nginx válida?
 ```
 

@@ -49,7 +49,7 @@
 # portal) é ajustado depois pelo role flask_portal.
 - name: Garantir logfile do portal para a jail do Fail2ban
   ansible.builtin.file:
-    path: /var/log/cdpni_portal_access.log
+    path: /var/log/{{ portal.nome | replace('-','_') }}_access.log
     state: touch
     mode: "0664"
     access_time: preserve
@@ -58,13 +58,13 @@
 - name: Configurar Fail2ban — jail Portal Flask
   ansible.builtin.template:
     src: portal-jail.conf.j2
-    dest: /etc/fail2ban/jail.d/cdpni-portal.conf
+    dest: /etc/fail2ban/jail.d/{{ portal.nome }}.conf
     mode: "0644"
   notify: restart fail2ban
 
 - name: Filtro Fail2ban para o portal Flask
   ansible.builtin.copy:
-    dest: /etc/fail2ban/filter.d/cdpni-portal.conf
+    dest: /etc/fail2ban/filter.d/{{ portal.nome }}.conf
     content: |
       [Definition]
       # Detecta POST /login com resposta 200 contendo "inválidos" (login falhou mas retornou 200)

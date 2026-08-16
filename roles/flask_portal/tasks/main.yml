@@ -53,7 +53,7 @@
 
 - name: Criar serviço PAM exclusivo para o portal (sem winbind)
   ansible.builtin.copy:
-    dest: /etc/pam.d/cdpni-portal
+    dest: /etc/pam.d/{{ portal.nome }}
     content: |
       auth     required    pam_unix.so
       account  required    pam_unix.so
@@ -372,7 +372,7 @@
 
 - name: Configurar sudoers para o portal (chpasswd + smbpasswd)
   ansible.builtin.copy:
-    dest: /etc/sudoers.d/cdpni-portal
+    dest: /etc/sudoers.d/{{ portal.nome }}
     content: |
       Defaults:{{ portal.user }} !log_allowed, !syslog, !requiretty
       {{ portal.user }} ALL=(root) NOPASSWD: /usr/local/bin/cdpni-setpass, /usr/local/bin/cdpni-setgroup, /usr/local/bin/cdpni-useradd, /usr/local/bin/cdpni-userdel, /usr/local/bin/cdpni-groupadd, /usr/local/bin/cdpni-groupdel, /usr/local/bin/cdpni-smart, /usr/local/bin/cdpni-raid, /usr/bin/smbpasswd, /usr/sbin/useradd, /usr/sbin/userdel, /usr/sbin/usermod, /usr/sbin/groupadd, /usr/sbin/groupdel, /usr/bin/gpasswd, /usr/bin/tee, /bin/tee, /usr/bin/systemctl, /usr/bin/smbstatus, /usr/bin/smbcontrol, /usr/bin/testparm, /usr/bin/pdbedit, /usr/bin/smartctl, /bin/mkdir, /bin/chmod, /bin/chown, /bin/tar, /usr/bin/tar, /usr/bin/tail, /usr/bin/setfacl, /usr/bin/getfacl, /bin/mv, /usr/bin/mv, /bin/rm, /usr/bin/rm, /bin/bash
@@ -403,8 +403,8 @@
 
 - name: Criar serviço systemd do portal
   ansible.builtin.template:
-    src: cdpni-portal.service.j2
-    dest: /etc/systemd/system/cdpni-portal.service
+    src: portal.service.j2
+    dest: /etc/systemd/system/{{ portal.nome }}.service
     mode: "0644"
   notify:
     - reload systemd
@@ -418,19 +418,19 @@
     group: "{{ portal.user }}"
     mode: "0664"
   loop:
-    - /var/log/cdpni_portal_access.log
-    - /var/log/cdpni_portal_error.log
+    - /var/log/{{ portal.nome | replace('-','_') }}_access.log
+    - /var/log/{{ portal.nome | replace('-','_') }}_error.log
 
 - name: Configurar Nginx — portal (8443 SSL)
   ansible.builtin.template:
     src: nginx-portal.conf.j2
-    dest: /etc/nginx/sites-available/cdpni-portal
+    dest: /etc/nginx/sites-available/{{ portal.nome }}
     mode: "0644"
 
 - name: Ativar site do portal
   ansible.builtin.file:
-    src: /etc/nginx/sites-available/cdpni-portal
-    dest: /etc/nginx/sites-enabled/cdpni-portal
+    src: /etc/nginx/sites-available/{{ portal.nome }}
+    dest: /etc/nginx/sites-enabled/{{ portal.nome }}
     state: link
 
 - name: Remover site default do nginx
@@ -450,7 +450,7 @@
 
 - name: Habilitar e iniciar portal
   ansible.builtin.systemd:
-    name: cdpni-portal
+    name: "{{ portal.nome }}"
     state: started
     enabled: true
     daemon_reload: true

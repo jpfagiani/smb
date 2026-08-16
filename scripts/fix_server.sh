@@ -2,6 +2,14 @@
 # Aplica correções em servidores instalados antes dos fixes do git
 set -e
 
+# Nome do portal — lido do group_vars para acompanhar a convenção
+# <servidor>-portal. Sem o arquivo, cai no padrão.
+PORTAL_NOME=$(awk '/^portal:/{p=1;next} p&&/^[a-z]/{p=0} p&&/nome:/{print $2;exit}' \
+              /opt/smb/group_vars/all.yml 2>/dev/null)
+PORTAL_NOME="${PORTAL_NOME:-smb-portal}"
+PORTAL_DIR="/opt/$PORTAL_NOME"
+
+
 if [[ $EUID -ne 0 ]]; then
     echo "Execute como root: sudo bash fix_server.sh"
     exit 1
@@ -225,12 +233,12 @@ chmod 700 /usr/local/bin/cdpni-smart
 echo "    OK: /usr/local/bin/cdpni-smart"
 
 echo "==> Atualizando sudoers..."
-cat > /etc/sudoers.d/cdpni-portal << 'EOF'
+cat > "/etc/sudoers.d/$PORTAL_NOME" << 'EOF'
 Defaults:cdpni !log_allowed, !syslog, !requiretty
 cdpni ALL=(root) NOPASSWD: /usr/local/bin/cdpni-setpass, /usr/local/bin/cdpni-setgroup, /usr/local/bin/cdpni-useradd, /usr/local/bin/cdpni-userdel, /usr/local/bin/cdpni-groupadd, /usr/local/bin/cdpni-groupdel, /usr/local/bin/cdpni-smart, /usr/bin/smbpasswd, /usr/sbin/useradd, /usr/sbin/userdel, /usr/sbin/usermod, /usr/sbin/groupadd, /usr/sbin/groupdel, /usr/bin/gpasswd, /usr/bin/tee, /bin/tee, /usr/bin/systemctl, /usr/bin/smbstatus, /usr/bin/smbcontrol, /usr/bin/testparm, /usr/bin/smartctl, /bin/mkdir, /bin/chmod, /bin/chown, /bin/tar, /usr/bin/tar, /usr/bin/tail, /usr/bin/setfacl, /usr/bin/getfacl, /bin/mv, /usr/bin/mv, /bin/rm, /usr/bin/rm, /bin/bash
 EOF
-chmod 440 /etc/sudoers.d/cdpni-portal
-visudo -cf /etc/sudoers.d/cdpni-portal && echo "    OK: /etc/sudoers.d/cdpni-portal"
+chmod 440 "/etc/sudoers.d/$PORTAL_NOME"
+visudo -cf "/etc/sudoers.d/$PORTAL_NOME" && echo "    OK: /etc/sudoers.d/$PORTAL_NOME"
 
 echo "==> Adicionando cdpni ao grupo adm (acesso a logs)..."
 usermod -aG adm cdpni
@@ -240,12 +248,12 @@ echo "==> Atualizando repositório..."
 cd /opt/smb && git pull
 
 echo "==> Atualizando app.py..."
-cp /opt/smb/roles/flask_portal/files/app.py /opt/cdpni-portal/app.py
-chown cdpni:cdpni /opt/cdpni-portal/app.py
+cp /opt/smb/roles/flask_portal/files/app.py $PORTAL_DIR/app.py
+chown cdpni:cdpni $PORTAL_DIR/app.py
 
 echo "==> Reiniciando portal..."
-systemctl restart cdpni-portal
-systemctl is-active cdpni-portal && echo "    OK: cdpni-portal ativo"
+systemctl restart "$PORTAL_NOME"
+systemctl is-active "$PORTAL_NOME" && echo "    OK: $PORTAL_NOME ativo"
 
 echo ""
 echo "Fix aplicado com sucesso."
