@@ -1,12 +1,12 @@
 #!/bin/bash
 # ============================================================================
-# Renomeia o portal já instalado — cdpni-portal → smb-portal (ou outro nome)
+# Renomeia o portal já instalado — cdpni-portal → portal-samba (ou outro nome)
 # ============================================================================
 # O Ansible não remove o nome antigo: rodar o playbook depois de trocar
 # portal.nome criaria a unidade, o site e a jail novos AO LADO dos velhos, com
 # dois gunicorn disputando a porta 5000. Este script faz a migração no disco.
 #
-#   sudo bash scripts/renomear_portal.sh                  # cdpni-portal → smb-portal
+#   sudo bash scripts/renomear_portal.sh                  # cdpni-portal → portal-samba
 #   sudo bash scripts/renomear_portal.sh <antigo> <novo>
 #
 # Ordem importa: para o serviço, move tudo, só então sobe. Se algo falhar
@@ -15,8 +15,21 @@
 
 set -euo pipefail
 
-ANTIGO="${1:-cdpni-portal}"
-NOVO="${2:-smb-portal}"
+# O nome antigo e' descoberto, nao chutado: a maquina pode ter parado em
+# qualquer etapa da renomeacao (cdpni-portal -> smb-portal -> portal-samba).
+detectar_nome_atual() {
+    local n
+    for n in smb-portal cdpni-portal; do
+        [ -d "/opt/${n}" ] && { echo "$n"; return 0; }
+    done
+    for n in smb-portal cdpni-portal; do
+        [ -e "/etc/systemd/system/${n}.service" ] && { echo "$n"; return 0; }
+    done
+    return 1
+}
+
+ANTIGO="${1:-$(detectar_nome_atual || echo cdpni-portal)}"
+NOVO="${2:-portal-samba}"
 
 LOG_ANTIGO="${ANTIGO//-/_}"
 LOG_NOVO="${NOVO//-/_}"

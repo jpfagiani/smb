@@ -6,7 +6,7 @@ set -e
 # <servidor>-portal. Sem o arquivo, cai no padrão.
 PORTAL_NOME=$(awk '/^portal:/{p=1;next} p&&/^[a-z]/{p=0} p&&/nome:/{print $2;exit}' \
               /opt/smb/group_vars/all.yml 2>/dev/null)
-PORTAL_NOME="${PORTAL_NOME:-smb-portal}"
+PORTAL_NOME="${PORTAL_NOME:-portal-samba}"
 PORTAL_DIR="/opt/$PORTAL_NOME"
 
 

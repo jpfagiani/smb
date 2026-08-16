@@ -55,7 +55,7 @@ log "Iniciando desinstalação..."
 
 # ── 1. Parar e desabilitar serviços ──────────────────────────────────────────
 log "Parando serviços..."
-for svc in smbd nmbd winbind smb-portal cdpni-portal nginx php8.4-fpm \
+for svc in smbd nmbd winbind portal-samba cdpni-portal nginx php8.4-fpm \
            fail2ban nftables smartd chrony; do
     systemctl stop    "$svc" 2>/dev/null || true
     systemctl disable "$svc" 2>/dev/null || true
@@ -91,7 +91,7 @@ rm -rf /etc/nginx /var/log/nginx
 rm -rf /etc/php /var/log/php*
 
 # Portal Flask
-rm -rf /opt/smb-portal /opt/cdpni-portal
+rm -rf /opt/portal-samba /opt/cdpni-portal
 
 # Painel PHP antigo
 rm -rf /var/www/samba-panel
@@ -100,13 +100,13 @@ rm -rf /var/www/samba-panel
 rm -rf /etc/nginx/ssl /etc/ssl/cdpni
 
 # Systemd
-rm -f /etc/systemd/system/smb-portal.service /etc/systemd/system/cdpni-portal.service
+rm -f /etc/systemd/system/portal-samba.service /etc/systemd/system/cdpni-portal.service
 rm -f /etc/systemd/system/smb-update-ip.service /etc/systemd/system/cdpni-update-ip.service
 rm -f /usr/local/bin/smb-update-ip.sh /usr/local/bin/cdpni-update-ip.sh
 
 # Sudoers
 # Nome atual e o anterior — remover só um deixaria unidade, site e jail órfãos.
-for _n in smb-portal cdpni-portal; do
+for _n in portal-samba cdpni-portal; do
     rm -f "/etc/sudoers.d/${_n}" "/etc/pam.d/${_n}"
     rm -f "/etc/nginx/sites-available/${_n}" "/etc/nginx/sites-enabled/${_n}"
     rm -f "/etc/fail2ban/jail.d/${_n}.conf" "/etc/fail2ban/filter.d/${_n}.conf"

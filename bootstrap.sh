@@ -577,8 +577,8 @@ samba:
   extra_admins: []
 
 portal:
-  nome: smb-portal
-  dir:  /opt/smb-portal
+  nome: portal-samba
+  dir:  /opt/portal-samba
   user: cdpni
   port: 5000
 

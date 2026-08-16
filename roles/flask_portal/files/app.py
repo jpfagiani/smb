@@ -28,7 +28,7 @@ BACKUP_DIR      = app.config.get('BACKUP_DIR', '/opt/backups')
 # Nome do portal e serviço PAM vêm do Ansible (config.py). Fixá-los aqui
 # faria o login parar de funcionar assim que o portal fosse renomeado, já
 # que o arquivo em /etc/pam.d acompanha o nome.
-PORTAL_NAME     = app.config.get('PORTAL_NAME', 'smb-portal')
+PORTAL_NAME     = app.config.get('PORTAL_NAME', 'portal-samba')
 PAM_SERVICE     = app.config.get('PAM_SERVICE', PORTAL_NAME)
 PORTAL_DIR      = f'/opt/{PORTAL_NAME}'
 BACKUP_INFO_FILE = os.path.join(PORTAL_DIR, '.backup_info.json')
