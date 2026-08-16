@@ -606,15 +606,15 @@ raid:
   # Autoriza formatar discos com dados de instalação anterior (gravado pelo
   # bootstrap após confirmação; a role storage exige true para formatar)
   confirmo_formatacao: ${CONFIRMO_FORMATACAO}
-
-# Portas de outros sistemas nesta máquina (política do firewall é DROP)
-firewall:
-  extra_tcp: [$(IFS=', '; echo "${EXTRA_TCP[*]:-}")]
-  extra_udp: [$(IFS=', '; echo "${EXTRA_UDP[*]:-}")]
   mount:   /mnt/raid
   device:  /dev/md0
   devices:
 ${_DISKS_YAML}
+# Portas de outros sistemas nesta máquina (política do firewall é DROP)
+firewall:
+  extra_tcp: [$(IFS=', '; echo "${EXTRA_TCP[*]:-}")]
+  extra_udp: [$(IFS=', '; echo "${EXTRA_UDP[*]:-}")]
+
 samba:
   workgroup:    "WORKGROUP"
   default_pass: "${SAMBA_PASS}"
