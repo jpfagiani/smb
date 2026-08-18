@@ -327,35 +327,6 @@ while true; do
     warn "IP inválido"
 done
 
-# NTP — a fonte de hora da intranet. Diferente do DNS: aqui NÃO cabe
-# 127.0.0.1. O chrony desta máquina é o servidor de hora, e um servidor de
-# hora precisa de uma fonte externa — apontá-lo para si mesmo o faria
-# sincronizar consigo próprio e distribuir a hora errada para a LAN inteira.
-_NTP_SUG="10.14.8.20"
-if [[ -f /etc/gwos/gwos.conf ]]; then
-    # NTP_SERVIDORES pode trazer vários, separados por espaço. Pega o primeiro
-    # sem colar um no outro — um 'tr -d " "' aqui produziria "10.14.8.2010.1.6.222".
-    _ntp_gwos=$(awk -F= '/^NTP_SERVIDORES=/{gsub(/"/,"",$2); print $2}'                 /etc/gwos/gwos.conf 2>/dev/null | awk '{print $1}')
-    [[ -n "$_ntp_gwos" ]] && _NTP_SUG="$_ntp_gwos"
-fi
-
-if [[ -e /etc/gwos/modulos.d/hora-chrony ]]; then
-    # Nem pergunta. O módulo hora-chrony do GWOS é o dono do chrony aqui, e a
-    # role common não sobrescreve o chrony.conf quando ele está presente — a
-    # resposta iria para o all.yml e nunca seria aplicada. Perguntar um valor
-    # que se descarta é pior que não perguntar: parece ter efeito.
-    NTP="$_NTP_SUG"
-    info "Hora: já gerenciada pelo GWOS (fonte ${NTP}) — não perguntado."
-    info "Para trocar: gwos-definir NTP_SERVIDORES <ip> && gwos-integrar"
-else
-    while true; do
-        ask "Servidor NTP [${_NTP_SUG}]:"
-        read -rp "  > " _IN; NTP="${_IN:-$_NTP_SUG}"
-        valid_ip "$NTP" && break
-        warn "IP inválido"
-    done
-fi
-
 # Hostname
 while true; do
     ask "Nome do servidor [cdpni]:"
@@ -632,7 +603,6 @@ server:
   mask:       "${SAMBA_MASK}"
   gateway:    "${GATEWAY}"
   dns:        "${DNS}"
-  ntp:        "${NTP}"
   hostname:   "${HOSTNAME}"
   domain:     "${DOMAIN}"
   admin_user: "${ADMIN_USER}"
@@ -706,3 +676,14 @@ ansible-playbook -i inventory/hosts.ini site.yml \
 
 echo ""
 ok "Log completo em /var/log/cdpni_ansible.log"
+
+# A hora ficou de fora de proposito (ver roles/common/tasks/main.yml). Numa
+# maquina sem o GWOS ninguem acerta o relogio, e relogio errado faz o apt
+# recusar as assinaturas dos repositorios e a autenticacao do Samba falhar.
+if [ ! -e /etc/gwos/modulos.d/hora-chrony ]; then
+    echo ""
+    warn "A hora do servidor NAO foi configurada por esta instalacao."
+    echo  "     Sem fonte de hora o apt passa a recusar assinaturas e o Samba"
+    echo  "     comeca a falhar autenticacao por diferenca de horario."
+    echo  "     Configure agora:  sudo bash ${SCRIPT_DIR}/scripts/configurar_hora.sh"
+fi

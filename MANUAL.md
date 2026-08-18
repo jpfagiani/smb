@@ -28,7 +28,7 @@ Um servidor de arquivos completo para a rede local da unidade, com:
 - Máquina com **1 ou mais discos além do disco do sistema** — com 2+ o instalador monta RAID (recomendado); com apenas 1, instala em **modo disco único**, sem tolerância a falhas (⚠️ backups tornam-se ainda mais importantes);
 - **Debian 13** instalado no disco do sistema (instalação padrão, sem interface gráfica);
 - Acesso à internet durante a instalação (para baixar os pacotes);
-- Os IPs da sua rede em mãos: IP fixo para o servidor, gateway, DNS e NTP.
+- Os IPs da sua rede em mãos: IP fixo para o servidor, gateway e DNS.
 
 > ⚠️ **Os discos escolhidos para o RAID serão totalmente apagados.**
 > Confira duas vezes qual é o disco do sistema antes de confirmar.
@@ -57,7 +57,6 @@ O instalador é interativo. O que cada pergunta significa:
 | **Máscara CIDR** | Quase sempre `24` (rede /24 = 254 endereços) |
 | **Gateway** | O roteador da rede — precisa estar na mesma faixa do IP (o instalador valida) |
 | **DNS** | Servidor de nomes. Se o BIND9 do GWOS estiver nesta máquina, o instalador sugere `127.0.0.1` sozinho — aceite. Se o GWOS estiver em **outra** máquina, informe o IP dela |
-| **Servidor NTP** | Fonte de hora da intranet — padrão `10.14.8.20` (GPU). Hora errada quebra o apt e bagunça os logs. **Não aparece** quando o GWOS já gerencia o chrony |
 | **Nome do servidor** | Ex.: `smb` — vira o endereço `smb.dominio` |
 | **Domínio local** | Ex.: `cdpni.local` |
 | **Sigla da unidade** | Ex.: `CDPNI` — aparece no portal e no certificado |
@@ -115,6 +114,34 @@ sudo gwos-gerar-nftables
 As portas ficam assim, em qualquer unidade: **80** portal de sistemas, **8080**
 painel do GWOS, **8443** este portal.
 
+
+### 2.5 A hora do servidor
+
+**A instalação não configura o relógio.** É de propósito: numa unidade com o
+gateway GWOS, quem serve a hora para a rede é ele, e dois donos do
+`/etc/chrony/chrony.conf` apagam as regras um do outro sem avisar.
+
+Se este servidor está **sozinho**, acerte a hora depois de instalar:
+
+```bash
+sudo bash scripts/configurar_hora.sh
+```
+
+Ele pergunta a fonte (sugerindo o gateway da rede), instala o `chrony`, valida
+a configuração antes de aplicar e mostra o resultado. Passando o servidor
+direto, roda sem perguntar nada:
+
+```bash
+sudo bash scripts/configurar_hora.sh 10.14.8.20
+```
+
+Com o GWOS na máquina o script detecta e não mexe em nada — indica o
+`gwos-definir`, que é o caminho certo ali.
+
+**Por que isso importa:** relógio errado faz o `apt` recusar as assinaturas dos
+repositórios ("Not live until…") e a autenticação do Samba começar a falhar por
+diferença de horário. O `bootstrap.sh` avisa no final quando a hora ficou
+pendente.
 ## 3. O Portal — dia a dia
 
 Acesse `https://IP-do-servidor:8443` e entre com **usuário e senha do Samba** (os mesmos dos compartilhamentos). Administradores veem todos os menus; usuários comuns veem apenas seus arquivos.
@@ -310,7 +337,7 @@ cp /opt/smb/group_vars/all.yml /root/all.yml.bak
 | Portal não abre (timeout) | nginx parado ou firewall | `systemctl restart nginx` · confira se a máquina está numa rede permitida |
 | Usuário não acessa o share | Sem senha Samba ou senha errada | Portal → Usuários → Trocar senha |
 | "Conta bloqueada" ao errar senha no portal | fail2ban baniu o IP (5 erros/5 min) | Espere 30 min ou `fail2ban-client set portal-samba unbanip <IP>` |
-| `apt update` reclama de assinatura "Not live until" | Relógio atrasado | `chronyc makestep` e confira o NTP (`chronyc sources`) |
+| `apt update` reclama de assinatura "Not live until" | Relógio atrasado | Se a hora nunca foi configurada: `sudo bash scripts/configurar_hora.sh`. Se já foi: `sudo chronyc makestep` e confira `chronyc sources` |
 | RAID degradado | Disco falhou | Manual técnico, seção "Substituir disco" |
 | Backup SMB falha na hora | Compartilhamento/senha errados | A mensagem do portal diz exatamente o quê; confira o compartilhamento no Windows |
 | Arquivo sumiu | Alguém excluiu | Portal → Lixeira → Restaurar |

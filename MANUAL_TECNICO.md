@@ -39,7 +39,7 @@ instalação, a máquina já está protegida.
 | Portal (HTTPS) | `nginx` | 8443/tcp | Proxy TLS na frente do gunicorn |
 | Firewall | `nftables` | — | Regras carregadas de `/etc/nftables.conf` |
 | Anti-brute-force | `fail2ban` | — | Bane IPs após erros de login |
-| Hora | `chrony` | 123/udp (cliente) | Sincroniza com o NTP institucional |
+| Hora | `chrony` | 123/udp (cliente) | **Fora do playbook** — instalado por `scripts/configurar_hora.sh` (seção 11) |
 | Auditoria | `rsyslog` | — | Grava o log de acessos do Samba em arquivo |
 | Ajuste de IP no boot | `smb-update-ip` | — | Oneshot: atualiza config/nginx/SSL se o IP mudou |
 
@@ -84,7 +84,7 @@ ansible-playbook -i inventory/hosts.ini site.yml --tags portal --diff
 
 | Tag | Aplica |
 |---|---|
-| `common` | Pacotes base, hostname, /etc/hosts, chrony (NTP), logrotate. O chrony é **pulado** se existir `/etc/gwos/modulos.d/hora-chrony` — ali o GWOS é o dono, e sobrescrever apagaria os `allow` que autorizam a LAN a pedir a hora |
+| `common` | Pacotes base, hostname, /etc/hosts, logrotate. **Não configura a hora** — ver seção 11 |
 | `network` | IP fixo, resolv.conf — **valida antes de gravar, nunca reinicia o networking**. Com o GWOS na máquina, mantenha o endereçamento: dois donos do `/etc/network/interfaces` geram duas definições da mesma placa e o `ifup` falha no boot |
 | `security` | nftables, fail2ban, smartd, certificado SSL. O ruleset é **pulado** se existir `/etc/gwos/modulos.d/firewall-nftables`: os dois projetos escrevem o mesmo `/etc/nftables.conf`, e o do GWOS carrega o NAT e os desvios do proxy e do DNS. As portas do Samba seguem alcançáveis pela regra `iif <LAN> accept` dele |
 | `storage` | RAID (com travas anti-destruição), fstab, monitoramento |
@@ -117,8 +117,6 @@ server:
   mask:       "24"            # prefixo CIDR (24 = 255.255.255.0)
   gateway:    "10.14.29.1"    # rota padrão — PRECISA estar dentro da rede ip/mask
   dns:        "10.14.29.1"    # gravado no /etc/resolv.conf
-  ntp:        "10.14.8.20"    # fonte de hora da intranet (chrony); sem ela o relógio
-                              # deriva e o apt rejeita assinaturas
   hostname:   "smb"           # nome da máquina → smb.cdpni.local
   domain:     "cdpni.local"
   admin_user: "sambadmin"     # usuário com bypass de permissões no Samba
@@ -744,6 +742,36 @@ tar -xzf backup_X.tar.gz -C /tmp/rest    # x = extrair, para um local neutro
 
 ## 11. Hora certa (chrony)
 
+### 11.1 Por que está fora do playbook
+
+O servidor de arquivos não é dono do relógio. Numa unidade com o gateway GWOS,
+o módulo `hora-chrony` dele escreve `/etc/chrony/conf.d/gwos.conf` com as regras
+`allow` que autorizam a rede a pedir a hora, e acrescenta `confdir` ao
+`chrony.conf`. Um segundo dono sobrescrevendo esse arquivo apagaria a linha do
+`confdir`: o `gwos.conf` continuaria no disco, mudo, e o servidor pararia de
+atender os clientes — **sem erro em log nenhum**.
+
+Por isso a role `common` não instala nem configura o `chrony`. Quem faz isso é
+um script avulso, rodado só quando faz sentido.
+
+### 11.2 Configurar
+
+```bash
+sudo bash scripts/configurar_hora.sh            # pergunta a fonte
+sudo bash scripts/configurar_hora.sh 10.14.8.20 # sem perguntar
+```
+
+O script instala o `chrony` se faltar, desativa o `systemd-timesyncd` (dois
+clientes NTP disputando o relógio se atrapalham), valida com `chronyd -p` antes
+de aplicar, faz backup do arquivo anterior e restaura se o serviço não subir.
+Gera `confdir /etc/chrony/conf.d`, para o GWOS poder acrescentar as regras dele
+se um dia o gateway for instalado na mesma máquina.
+
+Com `/etc/gwos/modulos.d/hora-chrony` presente ele não mexe em nada e indica o
+`gwos-definir`.
+
+### 11.3 Conferir
+
 ```bash
 chronyc sources
 #  └─ fontes de hora; "^*" = sincronizado com esta; "^?" = inalcançável
@@ -753,9 +781,9 @@ chronyc makestep
 #  └─ força o acerto IMEDIATO por salto (use após corrigir uma fonte)
 ```
 
-Config em `/etc/chrony/chrony.conf` (gerada): NTP institucional preferido →
-gateway como reserva → `pool.ntp.br` como última opção. **Sintoma clássico de
-relógio errado**: `apt update` falha com "Not live until…".
+**Sintoma clássico de relógio errado**: `apt update` falha com "Not live
+until…". O segundo é a autenticação do Samba recusando por diferença de
+horário.
 
 ---
 
@@ -798,6 +826,7 @@ nginx -t                                         # config do nginx válida?
 |---|---|
 | `bootstrap.sh` | Instalação do zero (interativo) — só na primeira vez |
 | `change-ip.sh` | Troca de IP segura (seção 4.3) |
+| `scripts/configurar_hora.sh` | Instala e configura o `chrony` (seção 11) — fora do bootstrap de propósito |
 | `scripts/raid_ids.sh` | Gera `raid.devices` com caminhos by-id a partir do array em uso |
 | `scripts/backup_pre_reinstall.sh` | Salva dados e configuração antes de reinstalar (seção 5.7) |
 | `scripts/restore_pos_reinstall.sh` | Restaura o que o anterior salvou |

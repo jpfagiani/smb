@@ -39,7 +39,6 @@
       - logrotate
       - mailutils
       - postfix
-      - chrony
       # ifupdown garante ifup/ifquery/networking.service para o
       # /etc/network/interfaces gerado pelo role network
       - ifupdown
@@ -74,40 +73,10 @@
     group: root
     mode: "0644"
 
-# O módulo hora-chrony do GWOS escreve /etc/chrony/conf.d/gwos.conf (com as
-# regras 'allow' que autorizam a LAN a pedir a hora, e 'local stratum 10') e
-# acrescenta 'confdir /etc/chrony/conf.d' ao chrony.conf. Sobrescrever o
-# chrony.conf aqui apagaria essa linha: o gwos.conf continuaria no disco, mudo,
-# e o servidor pararia de atender os clientes — sem erro nenhum no log.
-# Quando o GWOS está presente, ele é o dono do chrony.
-- name: Verificar se o GWOS já gerencia o chrony
-  ansible.builtin.stat:
-    path: /etc/gwos/modulos.d/hora-chrony
-  register: gwos_chrony
-
-- name: Configurar NTP (chrony)
-  ansible.builtin.template:
-    src: chrony.conf.j2
-    dest: /etc/chrony/chrony.conf
-    owner: root
-    group: root
-    mode: "0644"
-  when: not gwos_chrony.stat.exists
-  notify: restart chrony
-
-- name: Informar que o chrony pertence ao GWOS
-  ansible.builtin.debug:
-    msg: >-
-      O módulo hora-chrony do GWOS gerencia o chrony nesta máquina —
-      /etc/chrony/chrony.conf preservado. Para mudar a fonte de hora:
-      sudo gwos-definir NTP_SERVIDORES <ip> && sudo gwos-integrar
-  when: gwos_chrony.stat.exists
-
-- name: Habilitar e iniciar chrony
-  ansible.builtin.service:
-    name: chrony
-    state: started
-    enabled: true
+# A hora NÃO é configurada aqui — ver scripts/configurar_hora.sh.
+# O servidor de arquivos não precisa ser dono do relógio: numa unidade com o
+# gateway GWOS é ele quem serve a hora para a rede, e dois donos do
+# /etc/chrony/chrony.conf apagam as regras um do outro em silêncio.
 
 - name: Configurar logrotate para logs CDPNI
   ansible.builtin.copy:
