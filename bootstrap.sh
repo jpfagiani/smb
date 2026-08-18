@@ -484,50 +484,24 @@ fi
 # O firewall do Samba tem política DROP. Numa máquina compartilhada, tudo que
 # não for liberado aqui some da rede em silêncio — o sintoma seria "o DNS parou
 # depois que instalei o Samba", sem nada no log apontando o firewall.
+#
+# A detecção fica em scripts/detectar_outros_sistemas.sh, compartilhada com
+# scripts/atualizar_firewall.sh — não repetir esta lista em dois lugares, ou
+# um dia eles divergem sobre o que cada sistema conhecido precisa.
 # =============================================================================
-EXTRA_TCP=()
-EXTRA_UDP=()
-
 _porta_em_uso() { ss -lntuH "sport = :$1" 2>/dev/null | grep -q .; }
 
-if [[ -d /etc/gwos/modulos.d ]]; then
-    _mods=$(ls /etc/gwos/modulos.d/ 2>/dev/null | paste -sd ', ' -)
-    echo ""
-    info "GWOS detectado nesta máquina: ${_mods}"
-
-    if [[ -e /etc/gwos/modulos.d/dns-bind9 ]]; then
-        EXTRA_TCP+=(53); EXTRA_UDP+=(53)
-        echo "  → liberando 53 (DNS)"
+# shellcheck source=scripts/detectar_outros_sistemas.sh
+source "${SCRIPT_DIR}/scripts/detectar_outros_sistemas.sh"
+detectar_outros_sistemas
+for _linha in "${DETECTADOS[@]}"; do
+    if [[ "$_linha" == "  →"* ]]; then
+        echo "$_linha"
+    else
+        echo ""
+        info "$_linha"
     fi
-    if [[ -e /etc/gwos/modulos.d/hora-chrony ]]; then
-        EXTRA_UDP+=(123)
-        echo "  → liberando 123 (NTP)"
-    fi
-    if [[ -e /etc/gwos/modulos.d/painel-web ]]; then
-        # Convenção do projeto: 80 sistemas, 8080 gateway, 8443 samba.
-        # 80/443/8443 já estão em WEB_PORTS; só a do gateway precisa entrar.
-        _pp=$(awk -F= '/^PAINEL_PORTA=/{print $2}' /etc/gwos/gwos.conf 2>/dev/null | tr -d ' ')
-        _pp="${_pp:-8080}"
-        if [[ "$_pp" != "80" && "$_pp" != "443" && "$_pp" != "8443" ]]; then
-            EXTRA_TCP+=("$_pp")
-            echo "  → liberando ${_pp} (painel do GWOS)"
-        fi
-    fi
-    if [[ -e /etc/gwos/modulos.d/proxy-squid ]]; then
-        EXTRA_TCP+=(3127 3128 3129)
-        echo "  → liberando 3127-3129 (proxy Squid)"
-    fi
-fi
-
-# SGF — Sistema de Gestão de Frota (repositório separado: jpfagiani/sgf). Não é
-# um dos três portais do projeto GWOS, mas é comum coexistir nesta máquina.
-# Independe do GWOS estar instalado — por isso fica fora do bloco acima.
-if [[ -d /opt/sgf ]] || systemctl is-active --quiet sgf 2>/dev/null; then
-    EXTRA_TCP+=(8091)
-    echo ""
-    info "SGF detectado nesta máquina."
-    echo "  → liberando 8091 (portal SGF)"
-fi
+done
 
 # =============================================================================
 # DADOS PRÉVIOS NOS DISCOS — autorização explícita de formatação

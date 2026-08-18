@@ -578,6 +578,32 @@ A jail lê `/var/log/portal_samba_access.log`: login que falha devolve HTTP 200
 os 200 do `POST /login`. A jail `samba` vem **desativada** de propósito: o
 fail2ban não traz filtro para Samba e o log por máquina não tem caminho fixo.
 
+### 7.3 Liberar a porta de um sistema instalado depois do Samba
+
+O firewall só conhece o que existia quando o `bootstrap.sh` rodou pela última
+vez. Instalar um sistema novo nesta máquina depois disso — o SGF é o caso
+mais comum — deixa a porta dele bloqueada em silêncio até alguém redetectar.
+
+Repetir o `bootstrap.sh` inteiro resolve, mas reprocessa pacotes, rede, RAID,
+Samba e o portal só para trocar duas linhas do `group_vars/all.yml`. Em vez
+disso:
+
+```bash
+cd /opt/smb && sudo bash scripts/atualizar_firewall.sh
+```
+
+Ele roda a mesma detecção do `bootstrap.sh` (`scripts/detectar_outros_
+sistemas.sh` — as duas ferramentas leem o mesmo arquivo, para nunca
+divergirem sobre o que cada sistema conhecido precisa), atualiza só
+`firewall.extra_tcp`/`extra_udp` no `all.yml` e aplica de novo apenas a tag
+`firewall` do `site.yml` — que cobre o role `security` inteiro (nftables,
+fail2ban, smartd, certificado SSL) e pula common/network/storage/samba/
+flask_portal.
+
+Para ensinar este script sobre um sistema novo que ainda não conhece, edite
+a função em `scripts/detectar_outros_sistemas.sh` — é o único lugar; o
+`bootstrap.sh` lê dali também.
+
 ---
 
 ## 8. O Portal por dentro
@@ -831,6 +857,7 @@ nginx -t                                         # config do nginx válida?
 | `scripts/backup_pre_reinstall.sh` | Salva dados e configuração antes de reinstalar (seção 5.7) |
 | `scripts/restore_pos_reinstall.sh` | Restaura o que o anterior salvou |
 | `scripts/renomear_portal.sh` | Renomeia o serviço e o site do portal, detectando o nome atual |
+| `scripts/atualizar_firewall.sh` | Redetecta outros sistemas e libera as portas sem reinstalar (seção 7.3) |
 | `uninstall.sh` | Remove tudo (⚠️ destrutivo) |
 
 **Migração — servidores instalados antes de correções do repositório**
