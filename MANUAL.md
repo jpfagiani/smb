@@ -56,8 +56,8 @@ O instalador é interativo. O que cada pergunta significa:
 | **IP fixo do servidor** | O endereço que o servidor terá para sempre (ex.: `10.14.29.9`) |
 | **Máscara CIDR** | Quase sempre `24` (rede /24 = 254 endereços) |
 | **Gateway** | O roteador da rede — precisa estar na mesma faixa do IP (o instalador valida) |
-| **DNS** | Servidor de nomes (Enter = usa o gateway) |
-| **Servidor NTP** | Fonte de hora da intranet — padrão `10.14.8.20` (GPU). Hora errada quebra o apt e bagunça os logs |
+| **DNS** | Servidor de nomes. Se o BIND9 do GWOS estiver nesta máquina, o instalador sugere `127.0.0.1` sozinho — aceite. Se o GWOS estiver em **outra** máquina, informe o IP dela |
+| **Servidor NTP** | Fonte de hora da intranet — padrão `10.14.8.20` (GPU). Hora errada quebra o apt e bagunça os logs. **Não aparece** quando o GWOS já gerencia o chrony |
 | **Nome do servidor** | Ex.: `smb` — vira o endereço `smb.dominio` |
 | **Domínio local** | Ex.: `cdpni.local` |
 | **Sigla da unidade** | Ex.: `CDPNI` — aparece no portal e no certificado |
@@ -89,6 +89,31 @@ No Windows: `Win+R` → `\\IP-do-servidor` → lista dos compartilhamentos.
 > como "Autoridade de Certificação Raiz Confiável" nas máquinas.
 
 ---
+
+### 2.4 Quando o GWOS está na mesma máquina
+
+O gateway GWOS e este servidor de arquivos podem dividir o mesmo computador.
+Nesse caso **o GWOS é o dono** do firewall (`/etc/nftables.conf`), da hora
+(`chrony`) e do endereçamento (`/etc/network/interfaces`) — ali ficam o NAT, o
+desvio para o Squid e as regras que autorizam a rede a pedir a hora, coisas que
+este playbook não sabe recriar.
+
+O `bootstrap.sh` detecta o GWOS e recua sozinho nesses três pontos. Você só
+precisa saber de duas respostas:
+
+- **DNS**: `127.0.0.1` — é o BIND9 local. O instalador já sugere.
+- **Endereçamento**: mantenha como está, para não haver dois donos da rede.
+
+Para alterar qualquer um deles depois, use as ferramentas do GWOS:
+
+```bash
+sudo gwos ip <novo-ip>
+sudo gwos-definir NTP_SERVIDORES <ip> && sudo gwos-integrar
+sudo gwos-gerar-nftables
+```
+
+As portas ficam assim, em qualquer unidade: **80** portal de sistemas, **8080**
+painel do GWOS, **8443** este portal.
 
 ## 3. O Portal — dia a dia
 

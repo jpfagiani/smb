@@ -84,9 +84,9 @@ ansible-playbook -i inventory/hosts.ini site.yml --tags portal --diff
 
 | Tag | Aplica |
 |---|---|
-| `common` | Pacotes base, hostname, /etc/hosts, chrony (NTP), logrotate |
-| `network` | IP fixo, resolv.conf — **valida antes de gravar, nunca reinicia o networking** |
-| `security` | nftables, fail2ban, smartd, certificado SSL |
+| `common` | Pacotes base, hostname, /etc/hosts, chrony (NTP), logrotate. O chrony é **pulado** se existir `/etc/gwos/modulos.d/hora-chrony` — ali o GWOS é o dono, e sobrescrever apagaria os `allow` que autorizam a LAN a pedir a hora |
+| `network` | IP fixo, resolv.conf — **valida antes de gravar, nunca reinicia o networking**. Com o GWOS na máquina, mantenha o endereçamento: dois donos do `/etc/network/interfaces` geram duas definições da mesma placa e o `ifup` falha no boot |
+| `security` | nftables, fail2ban, smartd, certificado SSL. O ruleset é **pulado** se existir `/etc/gwos/modulos.d/firewall-nftables`: os dois projetos escrevem o mesmo `/etc/nftables.conf`, e o do GWOS carrega o NAT e os desvios do proxy e do DNS. As portas do Samba seguem alcançáveis pela regra `iif <LAN> accept` dele |
 | `storage` | RAID (com travas anti-destruição), fstab, monitoramento |
 | `samba` | Pacotes, usuários/grupos, smb.conf, rsyslog da auditoria |
 | `portal` | Portal web, wrappers, sudoers, nginx, serviços |
