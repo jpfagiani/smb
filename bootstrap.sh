@@ -519,6 +519,16 @@ if [[ -d /etc/gwos/modulos.d ]]; then
     fi
 fi
 
+# SGF — Sistema de Gestão de Frota (repositório separado: jpfagiani/sgf). Não é
+# um dos três portais do projeto GWOS, mas é comum coexistir nesta máquina.
+# Independe do GWOS estar instalado — por isso fica fora do bloco acima.
+if [[ -d /opt/sgf ]] || systemctl is-active --quiet sgf 2>/dev/null; then
+    EXTRA_TCP+=(8091)
+    echo ""
+    info "SGF detectado nesta máquina."
+    echo "  → liberando 8091 (portal SGF)"
+fi
+
 # =============================================================================
 # DADOS PRÉVIOS NOS DISCOS — autorização explícita de formatação
 # A role storage só formata discos com assinaturas de instalação anterior
