@@ -792,14 +792,31 @@ nginx -t                                         # config do nginx válida?
 
 ## 13. Mapa de scripts do repositório
 
+**Uso corrente**
+
 | Script | Uso |
 |---|---|
 | `bootstrap.sh` | Instalação do zero (interativo) — só na primeira vez |
 | `change-ip.sh` | Troca de IP segura (seção 4.3) |
 | `scripts/raid_ids.sh` | Gera `raid.devices` com caminhos by-id a partir do array em uso |
-| `fix_vars.sh` | Completa um all.yml antigo com seções novas (org, network_ranges…) |
-| `scripts/fix_*.sh` | Correções pontuais de grupos Samba (legado) |
+| `scripts/backup_pre_reinstall.sh` | Salva dados e configuração antes de reinstalar (seção 5.7) |
+| `scripts/restore_pos_reinstall.sh` | Restaura o que o anterior salvou |
+| `scripts/renomear_portal.sh` | Renomeia o serviço e o site do portal, detectando o nome atual |
 | `uninstall.sh` | Remove tudo (⚠️ destrutivo) |
+
+**Migração — servidores instalados antes de correções do repositório**
+
+Não fazem parte de uma instalação nova: o `bootstrap.sh` já entrega tudo
+correto. Existem para acertar máquinas que já estavam no ar. Rode apenas se o
+sintoma descrito aparecer.
+
+| Script | Corrige |
+|---|---|
+| `fix_vars.sh` | `all.yml` antigo, sem as seções novas (org, network_ranges…) |
+| `scripts/fix_server.sh` | Conjunto de correções acumuladas — servidores anteriores aos ajustes do git |
+| `scripts/fix_samba_group.sh` | Acrescenta `force group` nos shares, para permitir escrita entre usuários |
+| `scripts/fix_force_group.sh` | Alinha o `force group` de cada share ao grupo do `valid_users` |
+| `scripts/fix_missing_groups.sh` | Cria no Linux os grupos que existem no `smb.conf` mas não no sistema |
 
 ---
 
