@@ -327,7 +327,10 @@ while true; do
     warn "IP inválido"
 done
 
-# Hostname
+# Hostname — nome DESTA máquina. Escolha livre.
+echo ""
+echo -e "  ${DIM}Nome desta máquina na rede. Escolha o que preferir: samba,${NC}"
+echo -e "  ${DIM}arquivos, fileserver... Não afeta mais nada.${NC}"
 while true; do
     ask "Nome do servidor [cdpni]:"
     read -rp "  > " _IN; HOSTNAME="${_IN:-cdpni}"
@@ -335,9 +338,45 @@ while true; do
     warn "Hostname inválido (letras, dígitos, hífen)"
 done
 
-# Domínio
-ask "Domínio local [cdpni.local]:"
-read -rp "  > " _IN; DOMAIN="${_IN:-cdpni.local}"
+# Domínio — este NÃO é livre. Precisa ser o mesmo que o servidor DNS da rede
+# serve, senão o nome desta máquina nunca resolve para os clientes. Vai para o
+# /etc/hosts, o search do resolv.conf, o server_name do nginx e — pior de
+# desfazer — o CN do certificado SSL, que é gerado uma vez só.
+_DOM_SUG="cdpni.local"
+if [[ -f /etc/gwos/gwos.conf ]]; then
+    _d=$(awk -F= '/^DOMINIO_LOCAL=/{gsub(/"/,"",$2); print $2}' \
+         /etc/gwos/gwos.conf 2>/dev/null | tr -d ' ')
+    [[ -n "$_d" ]] && _DOM_SUG="$_d"
+fi
+
+echo ""
+echo -e "  ${DIM}Domínio da UNIDADE — não é o nome desta máquina.${NC}"
+echo -e "  ${DIM}Precisa ser o mesmo que o DNS da rede serve (normalmente o${NC}"
+echo -e "  ${DIM}gateway GWOS). Se não bater, o nome desta máquina não resolve${NC}"
+echo -e "  ${DIM}para os clientes, e o certificado SSL nasce com o nome errado.${NC}"
+[[ -f /etc/gwos/gwos.conf ]] && info "Lido do GWOS nesta máquina: ${_DOM_SUG}"
+
+while true; do
+    ask "Domínio local [${_DOM_SUG}]:"
+    read -rp "  > " _IN; DOMAIN="${_IN:-$_DOM_SUG}"
+
+    if [[ "$DOMAIN" != *.* ]] || \
+       ! [[ "$DOMAIN" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]]; then
+        warn "Domínio inválido — precisa ter um ponto (ex.: cdpni.local)."
+        continue
+    fi
+
+    # Erro comum: repetir aqui o nome da máquina, achando que as duas
+    # perguntas são a mesma. Gera endereços como samba.samba.local.
+    if [[ "${DOMAIN%%.*}" == "$HOSTNAME" ]]; then
+        warn "O domínio começa com '${HOSTNAME}' — o mesmo nome da máquina."
+        echo  "     O endereço final ficaria: ${HOSTNAME}.${DOMAIN}"
+        echo  "     O domínio é da unidade (ex.: cdpni.local), não desta máquina."
+        read -rp "  Usar '${DOMAIN}' mesmo assim? [s/N]: " _r
+        [[ "${_r,,}" == "s" ]] || continue
+    fi
+    break
+done
 
 # Identidade da unidade (aparece no portal web e no certificado SSL)
 _ORG_RE='^[A-Za-z0-9][A-Za-z0-9 ._-]{0,29}$'
