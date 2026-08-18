@@ -403,7 +403,10 @@ echo -e "  ${DIM}Requisitos: mínimo 8 caracteres, letras maiúsculas, minúscul
 while true; do
     ask "Senha padrão dos usuários Samba:"
     read -rsp "  > " SAMBA_PASS; echo ""
-    valid_pass "$SAMBA_PASS"; _rc=$?
+    # O || e obrigatorio: com "set -e", um valid_pass que retorna != 0
+    # encerra o script ANTES do _rc=$? — o laco em volta nunca rodava, e
+    # qualquer senha fraca abortava a instalacao sem uma linha de aviso.
+    _rc=0; valid_pass "$SAMBA_PASS" || _rc=$?
     if [[ $_rc -eq 2 ]]; then
         warn "Senha com caracteres inválidos — NÃO use setas/Tab/teclas especiais ao digitar. Tente de novo."
         continue
