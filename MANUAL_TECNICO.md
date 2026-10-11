@@ -705,7 +705,23 @@ volume que caiba o conteúdo (`/mnt/raid` tem 1,7 TB livres), **nunca** `/` —
 e mesmo assim RAID não é backup: o arquivo fica no mesmo servidor que ele
 deveria proteger.
 
-### 10.2 Em rede (o que o portal executa)
+### 10.2 Por download (padrão) — `/admin/backups/stream`
+
+O botão **Escolher local e gerar backup** chama essa rota. Ela roda
+`sudo tar -czf - -C / <itens>` e entrega a saída como resposta HTTP em fluxo
+(`Response` + generator, 1 MB por bloco); o navegador (Chrome/Edge,
+`showSaveFilePicker`) grava no local escolhido. Nada passa pelo disco do
+servidor. Pontos de atenção:
+
+- **nginx:** `location = /admin/backups/stream` com `proxy_buffering off` e
+  timeouts de 86400 s (o `location /` tem 120 s e cortaria o arquivo);
+- **gunicorn:** `--worker-class gthread --threads 4`; com workers `sync` o
+  download seria morto pelo `--timeout 120`;
+- **cancelamento:** fechar a aba/cancelar fecha o pipe e o `tar` morre por
+  SIGPIPE; o log (`/var/log/cdpni_backup.log`) registra OK / ERRO / CANCELADO;
+- `tar` com código 1 ("arquivo mudou durante a leitura") é normal em share em uso.
+
+### 10.3 Em rede por SMB (menu "Avançado" — o que o portal executa)
 
 ```bash
 mount -t cifs //10.14.29.129/Backups /run/smb_backup_X -o username=U,password=S,uid=0,gid=0
@@ -724,7 +740,7 @@ O portal ainda: testa o destino com `smbclient` **antes** de iniciar (erro
 aparece na hora, traduzido), aplica `timeout 90` no mount (porta filtrada não
 pendura a tela) e grava tudo em `/var/log/cdpni_backup.log`.
 
-### 10.3 Restaurar um backup — pelo portal (recomendado)
+### 10.4 Restaurar um backup — pelo portal (recomendado)
 
 Portal → **Backups → Histórico → ↩ Restaurar**. O que o portal executa por
 baixo (tudo logado em `/var/log/cdpni_restore.log`):
@@ -756,7 +772,7 @@ O card **⬆ Enviar Backup Externo** aceita um `.tar.gz` de fora do servidor
 (recebido em `/tmp` e movido com `sudo mv` para `/opt/backups` — o diretório
 pertence ao root; limite de 512 MB vem do `client_max_body_size` do nginx).
 
-### 10.4 Restaurar na mão (sem portal)
+### 10.5 Restaurar na mão (sem portal)
 
 ```bash
 tar -tzf backup_X.tar.gz | head          # t = listar conteúdo (conferir antes!)
@@ -851,12 +867,13 @@ nginx -t                                         # config do nginx válida?
 | Script | Uso |
 |---|---|
 | `bootstrap.sh` | Instalação do zero (interativo) — só na primeira vez |
+| `atualizar.sh` | **Atualiza o servidor** com a versão atual do repositório: completa o `all.yml`, migra o portal antigo para `portal-samba`, aplica `--tags portal` e confere |
 | `change-ip.sh` | Troca de IP segura (seção 4.3) |
 | `scripts/configurar_hora.sh` | Instala e configura o `chrony` (seção 11) — fora do bootstrap de propósito |
 | `scripts/raid_ids.sh` | Gera `raid.devices` com caminhos by-id a partir do array em uso |
 | `scripts/backup_pre_reinstall.sh` | Salva dados e configuração antes de reinstalar (seção 5.7) |
 | `scripts/restore_pos_reinstall.sh` | Restaura o que o anterior salvou |
-| `scripts/renomear_portal.sh` | Renomeia o serviço e o site do portal, detectando o nome atual |
+| `scripts/renomear_portal.sh` | Renomeia o portal (pasta, serviço, nginx, PAM, sudoers, fail2ban, logs) e acerta o `all.yml`; `-y` não pergunta. Chamado pelo `atualizar.sh` |
 | `scripts/atualizar_firewall.sh` | Redetecta outros sistemas e libera as portas sem reinstalar (seção 7.3) |
 | `uninstall.sh` | Remove tudo (⚠️ destrutivo) |
 
@@ -868,7 +885,7 @@ sintoma descrito aparecer.
 
 | Script | Corrige |
 |---|---|
-| `fix_vars.sh` | `all.yml` antigo, sem as seções novas (org, network_ranges…) |
+| `fix_vars.sh` | `all.yml` antigo, sem as seções novas (org, network_ranges…) ou sem `portal.nome`; `fix_vars.sh portal-samba` força nome e dir |
 | `scripts/fix_server.sh` | Conjunto de correções acumuladas — servidores anteriores aos ajustes do git |
 | `scripts/fix_samba_group.sh` | Acrescenta `force group` nos shares, para permitir escrita entre usuários |
 | `scripts/fix_force_group.sh` | Alinha o `force group` de cada share ao grupo do `valid_users` |

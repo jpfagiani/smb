@@ -54,6 +54,37 @@ add_if_missing "portal" "portal:
   user: cdpni
   port: 5000"
 
+# Seção portal de versão antiga (sem nome:/dir:) — o role flask_portal exige
+# portal.nome. Com argumento ("portal-samba") força nome e dir; sem argumento
+# só preenche o que falta, usando o nome JÁ instalado no disco para o
+# playbook não criar um segundo portal ao lado do existente.
+portal_get() {
+    awk -v k="$1" '/^portal:/{p=1;next} p&&/^[^ #\t]/{p=0} p&&$1==k":"{print $2;exit}' "$VARS"
+}
+NOME_ATUAL="$(portal_get nome)"
+DIR_ATUAL="$(portal_get dir)"
+NOME_ALVO="${1:-}"
+if [ -z "$NOME_ALVO" ] && [ -z "$NOME_ATUAL" ]; then
+    NOME_ALVO="portal-samba"
+    for n in portal-samba smb-portal cdpni-portal; do
+        [ -d "/opt/$n" ] && { NOME_ALVO="$n"; break; }
+    done
+fi
+if [ -n "$NOME_ALVO" ] && { [ -n "$1" ] || [ -z "$NOME_ATUAL" ] || [ -z "$DIR_ATUAL" ]; }; then
+    awk -v n="$NOME_ALVO" '
+        /^portal:/ { print; print "  nome: " n; print "  dir:  /opt/" n; inp=1; next }
+        inp && /^[^ #\t]/ { inp=0 }
+        inp && $1 ~ /^(nome|dir):$/ { next }
+        { print }' "$VARS" > "${VARS}.tmp"
+    if cmp -s "$VARS" "${VARS}.tmp"; then
+        rm -f "${VARS}.tmp"
+    else
+        cp -a "$VARS" "${VARS}.bak.$(date +%Y%m%d_%H%M%S)"
+        cat "${VARS}.tmp" > "$VARS" && rm -f "${VARS}.tmp"
+        echo "  ajustado:   portal.nome=${NOME_ALVO}  portal.dir=/opt/${NOME_ALVO}"
+    fi
+fi
+
 add_if_missing "ssl" "ssl:
   dir:      /etc/nginx/ssl
   cert:     /etc/nginx/ssl/cdpni.crt
@@ -65,4 +96,4 @@ add_if_missing "ssl" "ssl:
 
 echo ""
 echo "Pronto. Execute:"
-echo "  ansible-playbook -i inventory/hosts.ini site.yml --tags samba,security,portal"
+echo "  ansible-playbook -i inventory/hosts.ini site.yml --tags portal   (ou: sudo bash atualizar.sh)"

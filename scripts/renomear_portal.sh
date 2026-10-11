@@ -6,8 +6,9 @@
 # portal.nome criaria a unidade, o site e a jail novos AO LADO dos velhos, com
 # dois gunicorn disputando a porta 5000. Este script faz a migração no disco.
 #
-#   sudo bash scripts/renomear_portal.sh                  # cdpni-portal → portal-samba
+#   sudo bash scripts/renomear_portal.sh                  # (detecta) → portal-samba
 #   sudo bash scripts/renomear_portal.sh <antigo> <novo>
+#   sudo bash scripts/renomear_portal.sh -y               # sem perguntar (usado pelo atualizar.sh)
 #
 # Ordem importa: para o serviço, move tudo, só então sobe. Se algo falhar
 # antes de subir, o estado antigo ainda está inteiro em disco.
@@ -28,8 +29,14 @@ detectar_nome_atual() {
     return 1
 }
 
-ANTIGO="${1:-$(detectar_nome_atual || echo cdpni-portal)}"
-NOVO="${2:-portal-samba}"
+SIM=0
+ARGS=()
+for a in "$@"; do
+    case "$a" in -y|--sim) SIM=1 ;; *) ARGS+=("$a") ;; esac
+done
+ANTIGO="${ARGS[0]:-$(detectar_nome_atual || echo cdpni-portal)}"
+NOVO="${ARGS[1]:-portal-samba}"
+RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 LOG_ANTIGO="${ANTIGO//-/_}"
 LOG_NOVO="${NOVO//-/_}"
@@ -47,6 +54,7 @@ echo -e "\n${BOLD}Renomeando o portal: ${ANTIGO} → ${NOVO}${NC}\n"
 
 if [ ! -d "/opt/${ANTIGO}" ] && [ -d "/opt/${NOVO}" ]; then
     ok "Já está em /opt/${NOVO} — migração aparentemente feita."
+    [ -f "${RAIZ}/fix_vars.sh" ] && bash "${RAIZ}/fix_vars.sh" "${NOVO}"
     exit 0
 fi
 [ -d "/opt/${ANTIGO}" ] || erro "/opt/${ANTIGO} não existe. Nada a migrar."
@@ -60,8 +68,10 @@ echo "    sudoers  /etc/sudoers.d/${ANTIGO}   → ${NOVO}"
 echo "    fail2ban jail e filter ${ANTIGO}    → ${NOVO}"
 echo "    logs     /var/log/${LOG_ANTIGO}_*   → ${LOG_NOVO}_*"
 echo ""
-read -rp "  Confirma? [s/N]: " R
-[[ "${R:-N}" =~ ^[Ss]$ ]] || { echo "Cancelado."; exit 0; }
+if [ "$SIM" -ne 1 ]; then
+    read -rp "  Confirma? [s/N]: " R
+    [[ "${R:-N}" =~ ^[Ss]$ ]] || { echo "Cancelado."; exit 0; }
+fi
 
 # ---------------------------------------------------------------------------
 # 1. Parar o que está em execução
@@ -178,14 +188,17 @@ if [ -e /etc/systemd/system/cdpni-update-ip.service ]    && [ ! -e /etc/systemd/
     ok "cdpni-update-ip → smb-update-ip"
 fi
 
+# ---------------------------------------------------------------------------
+# 8. group_vars/all.yml — o playbook lê portal.nome/portal.dir daqui
+# ---------------------------------------------------------------------------
+if [ -f "${RAIZ}/fix_vars.sh" ]; then
+    bash "${RAIZ}/fix_vars.sh" "${NOVO}"
+else
+    aviso "fix_vars.sh não encontrado — ajuste portal.nome/dir no all.yml à mão."
+fi
+
 echo ""
-ok "Migração concluída."
-echo ""
-echo -e "  Atualize também o ${BOLD}group_vars/all.yml${NC}:"
-echo    "    portal:"
-echo    "      nome: ${NOVO}"
-echo    "      dir:  /opt/${NOVO}"
-echo ""
-echo    "  Depois confira o login no portal — é o PAM que muda de nome e,"
-echo    "  se ele e o config.py divergirem, ninguém entra."
+ok "Migração concluída: ${ANTIGO} → ${NOVO}."
+echo "  Falta aplicar o playbook:  ansible-playbook -i inventory/hosts.ini site.yml --tags portal"
+echo "  (ou simplesmente: sudo bash atualizar.sh)"
 echo ""

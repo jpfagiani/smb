@@ -268,13 +268,30 @@ O script pergunta o novo IP/gateway/DNS, valida tudo **antes** de aplicar e, se 
 
 ### Atualizar o sistema (novas versões deste repositório)
 
+1. Traga os arquivos novos para `/opt/smb`:
+   - com git: `cd /opt/smb && git pull`;
+   - sem git (zip): `scp` do zip para o servidor, `unzip -o` e
+     `cp -a smb-main/. /opt/smb/` (não apaga o `group_vars/all.yml`).
+2. Rode o atualizador — **um comando só**:
+
 ```bash
 cd /opt/smb
-git pull
-ansible-playbook -i inventory/hosts.ini site.yml --diff
+sudo bash atualizar.sh
 ```
 
-É seguro re-executar quantas vezes quiser: o playbook **nunca** apaga o RAID em uso nem reseta senhas já alteradas.
+Ele completa o `group_vars/all.yml`, migra o portal antigo (`cdpni-portal`)
+para o nome padrão **`portal-samba`** (só na primeira vez), aplica o playbook do
+portal e confere se o portal responde. Não mexe em RAID, shares, Samba nem
+firewall, e é seguro re-executar quantas vezes quiser.
+
+Se preferir o comando completo do Ansible (tudo, não só o portal):
+`ansible-playbook -i inventory/hosts.ini site.yml --diff` — nunca apaga o RAID
+em uso nem reseta senhas já alteradas.
+
+> **Padrão de nomes:** o portal se chama `portal-samba` (serviço, pasta
+> `/opt/portal-samba`, site do nginx, jail do fail2ban e logs
+> `portal_samba_*.log`). O nome identifica o servidor e o distingue de outros
+> portais da rede (portal-sistemas, portal-gateway).
 
 ### Reinstalar do zero preservando os dados do RAID
 
