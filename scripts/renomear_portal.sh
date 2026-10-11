@@ -91,6 +91,15 @@ ok "Serviço parado."
 mv "/opt/${ANTIGO}" "/opt/${NOVO}"
 ok "/opt/${ANTIGO} → /opt/${NOVO}"
 
+# O venv guarda o caminho absoluto no shebang dos scripts (bin/gunicorn, pip…)
+# e no pyvenv.cfg: movido sem este ajuste o gunicorn falha com "No such file
+# or directory" (status 203/EXEC).
+if [ -d "/opt/${NOVO}/venv" ]; then
+    grep -rIl "/opt/${ANTIGO}" "/opt/${NOVO}/venv/bin" "/opt/${NOVO}/venv/pyvenv.cfg" 2>/dev/null \
+        | xargs -r sed -i "s|/opt/${ANTIGO}|/opt/${NOVO}|g"
+    ok "venv ajustado para o novo caminho."
+fi
+
 # ---------------------------------------------------------------------------
 # 3. Arquivos de configuração — nome no caminho e nas referências internas
 # ---------------------------------------------------------------------------
