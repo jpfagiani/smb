@@ -188,13 +188,20 @@ Criar novos shares, definir se são restritos (por grupo) ou públicos, e editar
 
 **Backup padrão (recomendado) — escolher o local como no Windows:**
 
-1. Marque o que incluir e clique em **💾 Escolher local e gerar backup**;
+1. Marque o que incluir. **Compartilhamentos** (os arquivos dos usuários, mais de 2 TB)
+   vem **desmarcado** por padrão: o dia a dia só precisa das configurações, e assim
+   um clique distraído não dispara um backup gigante. O portal mostra o **tamanho total a copiar** (calculado em
+   segundo plano; com muitos arquivos pode levar alguns minutos) e atualiza
+   sempre que você marca/desmarca um item. Depois clique em
+   **💾 Escolher local e gerar backup**;
 2. Na janela "Salvar como" do navegador, escolha a pasta (disco, pendrive, HD
    externo ou unidade de rede mapeada) e confirme;
 3. O backup sai do servidor direto para o arquivo escolhido — **não usa o disco
    do servidor** e não pede IP, usuário nem senha. Como você já está logado como
    administrador, nada mais é necessário. Mantenha a aba aberta até aparecer
-   "Backup concluído"; **✖ Cancelar** descarta o arquivo parcial.
+   "Backup concluído"; **✖ Cancelar** descarta o arquivo parcial. Durante o
+   backup aparece a **barra de progresso com a porcentagem**, o que já foi lido,
+   o tempo decorrido e uma estimativa do que falta.
 
 Requer **Chrome ou Edge** para escolher a pasta. Em outros navegadores o arquivo
 é baixado pelo próprio navegador (pasta Downloads).

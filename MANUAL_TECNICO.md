@@ -717,6 +717,11 @@ servidor. Pontos de atenção:
   timeouts de 86400 s (o `location /` tem 120 s e cortaria o arquivo);
 - **gunicorn:** `--worker-class gthread --threads 4`; com workers `sync` o
   download seria morto pelo `--timeout 120`;
+- **estimativa e progresso:** `estimate/start|status` roda `du -sb` em segundo plano
+  (resultado em `/tmp/bkest_<id>`); o `tar` sai sem compactar e o portal compacta
+  em gzip (zlib) para contar os bytes lidos — a porcentagem é bytes lidos ÷ tamanho
+  do `du`, gravada em `/tmp/bkprog_<id>` e lida por `/progress` (arquivo, porque há
+  3 workers do gunicorn);
 - **cancelamento:** fechar a aba/cancelar fecha o pipe e o `tar` morre por
   SIGPIPE; o log (`/var/log/cdpni_backup.log`) registra OK / ERRO / CANCELADO;
 - `tar` com código 1 ("arquivo mudou durante a leitura") é normal em share em uso.

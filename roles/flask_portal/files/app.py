@@ -2498,21 +2498,30 @@ BACKUPS_T = BASE_T.replace("__BODY__", r"""
     <div class="form-group">
       <label>Incluir no backup</label>
       <div style="display:flex;flex-wrap:wrap;gap:.5rem .75rem;margin-top:.25rem">
-        <label style="font-weight:400;font-size:.83rem"><input type="checkbox" class="bkItem" value="shares" checked> Compartilhamentos (<code>{{ samba_root }}</code>)</label>
+        <label style="font-weight:400;font-size:.83rem"><input type="checkbox" class="bkItem" value="shares"> Compartilhamentos (<code>{{ samba_root }}</code>) <span class="text-muted" style="font-size:.76rem">— arquivos dos usuários, pode passar de 2&nbsp;TB</span></label>
         <label style="font-weight:400;font-size:.83rem"><input type="checkbox" class="bkItem" value="samba" checked> Configuração Samba (<code>/etc/samba</code>)</label>
         <label style="font-weight:400;font-size:.83rem"><input type="checkbox" class="bkItem" value="sambadb" checked> Banco do Samba — senhas/SID (<code>/var/lib/samba</code>)</label>
         <label style="font-weight:400;font-size:.83rem"><input type="checkbox" class="bkItem" value="users" checked> Usuários/Grupos (<code>/etc/passwd, shadow, group</code>)</label>
         <label style="font-weight:400;font-size:.83rem"><input type="checkbox" class="bkItem" value="portal" checked> Portal (<code>__PORTAL_DIR__</code>)</label>
       </div>
     </div>
+    <div id="bkEstimate" style="margin:.25rem 0 .75rem;font-size:.9rem">
+      <span class="text-muted">Tamanho a copiar:</span>
+      <strong id="bkEstimateVal" style="font-family:var(--mono)">calculando...</strong>
+      <span class="text-muted" style="font-size:.78rem" id="bkEstimateNote"></span>
+    </div>
     <button type="button" class="btn btn-primary" id="bkStreamBtn" onclick="bkStreamStart()">💾 Escolher local e gerar backup</button>
     <div id="bkStreamBox" style="display:none;margin-top:1rem">
-      <div style="margin-bottom:.5rem">
-        <span id="bkStreamSize" style="font-family:var(--mono);font-size:1.1rem;font-weight:600">0 B</span>
-        <span class="text-muted" style="font-size:.82rem"> gravados &nbsp;·&nbsp; <span id="bkStreamTime">0s</span> decorridos</span>
+      <div style="display:flex;align-items:baseline;gap:.75rem;margin-bottom:.4rem">
+        <span id="bkPct" style="font-family:var(--mono);font-size:1.6rem;font-weight:700">0%</span>
+        <span id="bkDetail" class="text-muted" style="font-size:.82rem">iniciando...</span>
       </div>
-      <div style="background:var(--border);border-radius:4px;height:10px;overflow:hidden;margin-bottom:.75rem">
-        <div id="bkStreamBar" style="height:100%;background:var(--accent);width:100%;border-radius:4px;opacity:.6"></div>
+      <div style="background:var(--border);border-radius:4px;height:14px;overflow:hidden;margin-bottom:.5rem">
+        <div id="bkStreamBar" style="height:100%;background:var(--accent);width:0%;border-radius:4px;transition:width .6s ease"></div>
+      </div>
+      <div class="text-muted" style="font-size:.8rem;margin-bottom:.5rem">
+        <span id="bkStreamSize">0 B</span> gravados no arquivo (compactado) &nbsp;·&nbsp;
+        <span id="bkStreamTime">0s</span> decorridos &nbsp;·&nbsp; <span id="bkEta"></span>
       </div>
       <div id="bkStreamMsg" class="text-muted" style="font-size:.82rem;margin-bottom:.5rem">Mantenha esta página aberta até concluir. O tamanho final depende do conteúdo dos compartilhamentos.</div>
       <button type="button" class="btn" id="bkStreamCancel" style="background:#c0392b;color:#fff;font-size:.82rem" onclick="bkStreamCancel()">✖ Cancelar</button>
@@ -2520,7 +2529,38 @@ BACKUPS_T = BASE_T.replace("__BODY__", r"""
   </div>
 </div>
 <script>
-var bkAbort = null, bkTimer = null, bkBusy = false;
+var bkAbort = null, bkTimer = null, bkBusy = false, bkTotal = 0, bkEstTimer = null, bkEstSeq = 0;
+function bkRid() {
+  var a = new Uint8Array(12); (window.crypto || window.msCrypto).getRandomValues(a);
+  return Array.prototype.map.call(a, function(b) { return ("0" + b.toString(16)).slice(-2); }).join("");
+}
+function bkJson(url, opts) {
+  return fetch(url, Object.assign({credentials: "same-origin"}, opts || {})).then(function(r) { return r.json(); });
+}
+function bkEstimate() {
+  var items = bkItems(), seq = ++bkEstSeq, val = document.getElementById("bkEstimateVal"),
+      note = document.getElementById("bkEstimateNote");
+  clearTimeout(bkEstTimer); bkTotal = 0;
+  if (!items.length) { val.textContent = "—"; note.textContent = ""; return; }
+  val.textContent = "calculando..."; note.textContent = "";
+  var id = bkRid();
+  bkJson("{{ url_for('backup_estimate_start') }}", {method: "POST", headers: {"Content-Type": "application/json"},
+         body: JSON.stringify({id: id, items: items})})
+  .then(function() {
+    (function poll() {
+      if (seq !== bkEstSeq) return;
+      bkJson("{{ url_for('backup_estimate_status') }}?id=" + id).then(function(d) {
+        if (seq !== bkEstSeq) return;
+        if (!d.done) { bkEstTimer = setTimeout(poll, 2000); return; }
+        bkTotal = d.total;
+        val.textContent = bkFmt(d.total);
+        note.textContent = "(sem compactação — o arquivo final costuma ficar menor)";
+      }).catch(function() { bkEstTimer = setTimeout(poll, 4000); });
+    })();
+  }).catch(function() { val.textContent = "não foi possível calcular"; });
+}
+document.querySelectorAll(".bkItem").forEach(function(e) { e.addEventListener("change", bkEstimate); });
+bkEstimate();
 function bkFmt(n) {
   var u = ["B","KB","MB","GB","TB"], i = 0;
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
@@ -2549,7 +2589,8 @@ async function bkStreamStart() {
   var items = bkItems();
   if (!items.length) { alert("Selecione ao menos um item para incluir no backup."); return; }
   var name = "backup_" + bkStamp() + ".tar.gz";
-  var url = "{{ url_for('backup_stream') }}?name=" + encodeURIComponent(name) + "&items=" + items.join(",");
+  var rid = bkRid();
+  var url = "{{ url_for('backup_stream') }}?name=" + encodeURIComponent(name) + "&items=" + items.join(",") + "&id=" + rid;
   // Navegador sem seletor de arquivo (Firefox/Safari/HTTP): download comum
   if (!window.showSaveFilePicker || !window.isSecureContext) {
     alert("Este navegador não permite escolher a pasta antes do download. O backup será baixado pelo próprio navegador (pasta Downloads, ou pergunta onde salvar se estiver configurado). Para escolher a pasta, use Chrome ou Edge.");
@@ -2566,11 +2607,31 @@ async function bkStreamStart() {
   bkAbort = new AbortController();
   var writable = null, got = 0, t0 = Date.now();
   bkUi(true, "Gerando e gravando o backup...");
-  bkTimer = setInterval(function() {
+  var raw = 0;
+  function pinta(fim) {
     var s = Math.floor((Date.now() - t0) / 1000);
     document.getElementById("bkStreamTime").textContent = Math.floor(s/3600) + "h " + ("0"+Math.floor(s%3600/60)).slice(-2) + "m " + ("0"+s%60).slice(-2) + "s";
     document.getElementById("bkStreamSize").textContent = bkFmt(got);
-  }, 500);
+    var bar = document.getElementById("bkStreamBar"), pct = document.getElementById("bkPct"),
+        det = document.getElementById("bkDetail"), eta = document.getElementById("bkEta");
+    if (fim) { bar.style.width = "100%"; pct.textContent = "100%"; eta.textContent = ""; return; }
+    if (bkTotal > 0) {
+      var p = Math.min(99, Math.floor(raw * 100 / bkTotal));
+      bar.style.width = p + "%"; pct.textContent = p + "%";
+      det.textContent = bkFmt(raw) + " de " + bkFmt(bkTotal) + " lidos";
+      if (raw > 0 && s > 5) {
+        var restante = Math.max(0, Math.round((bkTotal - raw) / (raw / s)));
+        eta.textContent = "faltam ~" + Math.floor(restante/3600) + "h " + ("0"+Math.floor(restante%3600/60)).slice(-2) + "m";
+      }
+    } else {
+      pct.textContent = "…"; det.textContent = bkFmt(raw) + " lidos (total ainda sendo calculado)";
+      bar.style.width = "100%"; bar.style.opacity = ".4";
+    }
+  }
+  bkTimer = setInterval(function() {
+    pinta(false);
+    bkJson("{{ url_for('backup_progress') }}?id=" + rid).then(function(d) { if (d && d.raw) raw = d.raw; }).catch(function() {});
+  }, 1500);
   try {
     var resp = await fetch(url, {signal: bkAbort.signal, credentials: "same-origin"});
     if (!resp.ok) throw new Error("O servidor respondeu " + resp.status);
@@ -2581,7 +2642,7 @@ async function bkStreamStart() {
       transform: function(chunk, ctl) { got += chunk.byteLength; ctl.enqueue(chunk); }
     });
     await resp.body.pipeThrough(counter).pipeTo(writable, {signal: bkAbort.signal});
-    document.getElementById("bkStreamSize").textContent = bkFmt(got);
+    pinta(true);
     bkUi(false, "✔ Backup concluído: " + handle.name + " (" + bkFmt(got) + ").");
   } catch (e) {
     try { if (writable) await writable.abort(); } catch (_) {}
@@ -3148,29 +3209,98 @@ def backup_run():
         flash(f'Erro ao iniciar backup: {e}', 'error')
     return redirect(url_for('backups_page'))
 
+BK_ITENS = {
+    'shares':  [SAMBA_ROOT],
+    'samba':   ['/etc/samba'],
+    'sambadb': ['/var/lib/samba'],
+    'users':   ['/etc/passwd', '/etc/shadow', '/etc/group'],
+    'portal':  [PORTAL_DIR],
+}
+
+def _bk_targets(itens_csv: str) -> tuple[list, list]:
+    itens = [i for i in itens_csv.split(',') if i in BK_ITENS]
+    return itens, [t for i in itens for t in BK_ITENS[i]]
+
+def _bk_id(valor: str) -> str:
+    """ID gerado pelo navegador; só hex, para virar nome de arquivo com segurança."""
+    if not re.fullmatch(r'[a-f0-9]{8,32}', valor or ''):
+        abort(400)
+    return valor
+
+def _bk_tmp(prefixo: str, ident: str) -> str:
+    import tempfile
+    return os.path.join(tempfile.gettempdir(), f'{prefixo}_{ident}')
+
+@app.route('/admin/backups/estimate/start', methods=['POST'])
+@admin_required
+def backup_estimate_start():
+    """Mede (du) o tamanho do que será copiado. Em segundo plano: com 2 TB de
+    arquivos o du leva minutos, mais que o timeout das requisições."""
+    data = request.get_json(force=True, silent=True) or {}
+    ident = _bk_id(data.get('id', ''))
+    _, targets = _bk_targets(','.join(data.get('items', [])))
+    if not targets:
+        return jsonify({'error': 'Selecione ao menos um item.'}), 400
+    import shlex
+    out, done = _bk_tmp('bkest', ident), _bk_tmp('bkest_done', ident)
+    for f in (out, done):
+        try: os.remove(f)
+        except OSError: pass
+    alvos = ' '.join(shlex.quote(t) for t in targets)
+    subprocess.Popen(
+        ['sudo', 'bash', '-c',
+         f'du -sb --apparent-size {alvos} > {shlex.quote(out)} 2>/dev/null; '
+         f'touch {shlex.quote(done)}'],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return jsonify({'ok': True})
+
+@app.route('/admin/backups/estimate/status')
+@admin_required
+def backup_estimate_status():
+    ident = _bk_id(request.args.get('id', ''))
+    out, done = _bk_tmp('bkest', ident), _bk_tmp('bkest_done', ident)
+    if not os.path.exists(done):
+        return jsonify({'done': False})
+    total = 0
+    try:
+        with open(out) as f:
+            for linha in f:
+                total += int(linha.split('\t', 1)[0])
+    except (OSError, ValueError):
+        pass
+    for f in (out, done):
+        try: os.remove(f)
+        except OSError: pass
+    return jsonify({'done': True, 'total': total, 'total_fmt': fmt_size(total)})
+
+@app.route('/admin/backups/progress')
+@admin_required
+def backup_progress():
+    ident = _bk_id(request.args.get('id', ''))
+    try:
+        with open(_bk_tmp('bkprog', ident)) as f:
+            return jsonify(json.load(f))
+    except (OSError, ValueError):
+        return jsonify({'raw': 0, 'sent': 0, 'done': False})
+
 @app.route('/admin/backups/stream')
 @admin_required
 def backup_stream():
     """Backup entregue por streaming ao navegador de quem clicou.
 
-    O tar|gzip sai direto para a conexão HTTP: nada é gravado no disco do
-    servidor (o disco de sistema tem 55 GB e os shares passam de 2 TB) e o
-    administrador escolhe o destino no próprio Windows (janela "Salvar
-    como"), sem informar IP/usuário/senha de compartilhamento.
+    O tar sai direto para a conexão HTTP (compactado em gzip aqui mesmo, para
+    contar quantos bytes ORIGINAIS já foram lidos e dar a porcentagem): nada é
+    gravado no disco do servidor (o disco de sistema tem 55 GB e os shares
+    passam de 2 TB) e o administrador escolhe o destino no próprio Windows
+    (janela "Salvar como"), sem informar IP/usuário/senha de compartilhamento.
     """
-    import tempfile
+    import tempfile, zlib
     tar = '/usr/bin/tar' if os.path.exists('/usr/bin/tar') else '/bin/tar'
-    mapa = {
-        'shares':  [SAMBA_ROOT],
-        'samba':   ['/etc/samba'],
-        'sambadb': ['/var/lib/samba'],
-        'users':   ['/etc/passwd', '/etc/shadow', '/etc/group'],
-        'portal':  [PORTAL_DIR],
-    }
-    itens = [i for i in request.args.get('items', '').split(',') if i in mapa]
-    targets = [t for i in itens for t in mapa[i]]
+    itens, targets = _bk_targets(request.args.get('items', ''))
     if not targets:
         abort(400)
+    ident = request.args.get('id', '')
+    ident = _bk_id(ident) if ident else ''
     nome = secure_filename(request.args.get('name', '')) or \
         f'backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.tar.gz'
     if not nome.endswith('.tar.gz'):
@@ -3182,25 +3312,49 @@ def backup_stream():
         run(['sudo', 'tee', '-a', log], input_=txt + '\n')
 
     # caminhos relativos + -C /: evita o aviso "Removendo '/' inicial"
-    cmd = ['sudo', tar, '-czf', '-', '-C', '/'] + [t.lstrip('/') for t in targets]
+    cmd = ['sudo', tar, '-cf', '-', '-C', '/'] + [t.lstrip('/') for t in targets]
     err = tempfile.TemporaryFile()
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err,
                             start_new_session=True)
     inicio = time.time()
     log_msg(f'=== {datetime.now():%d/%m/%Y %H:%M:%S} backup por download '
             f'({nome}) iniciado por {usuario}: {", ".join(itens)} ===')
+    prog_file = _bk_tmp('bkprog', ident) if ident else ''
+
+    def grava_progresso(raw, enviado, fim=False):
+        if not prog_file:
+            return
+        try:
+            with open(prog_file + '.tmp', 'w') as f:
+                json.dump({'raw': raw, 'sent': enviado, 'done': fim}, f)
+            os.replace(prog_file + '.tmp', prog_file)
+        except OSError:
+            pass
 
     def gerar():
-        enviado = 0
+        raw = enviado = 0
         completo = False
+        ultimo = 0.0
+        gz = zlib.compressobj(6, zlib.DEFLATED, 31)   # 31 = formato gzip
         try:
             while True:
                 bloco = proc.stdout.read(1024 * 1024)
                 if not bloco:
+                    resto = gz.flush()
+                    if resto:
+                        enviado += len(resto)
+                        yield resto
                     completo = True
                     break
-                enviado += len(bloco)
-                yield bloco
+                raw += len(bloco)
+                saida = gz.compress(bloco)
+                if saida:
+                    enviado += len(saida)
+                    yield saida
+                agora = time.time()
+                if agora - ultimo >= 1:
+                    ultimo = agora
+                    grava_progresso(raw, enviado)
         finally:
             # cliente cancelou/fechou a aba: fechar o pipe faz o tar morrer
             # por SIGPIPE; se não morrer, derruba o grupo de processos.
@@ -3216,6 +3370,7 @@ def backup_stream():
                     proc.wait(timeout=10)
                 except Exception:
                     pass
+            grava_progresso(raw, enviado, completo)
             err.seek(0)
             avisos = err.read().decode('utf-8', 'replace').strip()
             err.close()
