@@ -878,3 +878,34 @@ sintoma descrito aparecer.
 
 *Documento gerado a partir do estado real do repositório — cada trecho de
 configuração citado corresponde ao que os roles do Ansible instalam.*
+
+---
+
+## Acessos simultâneos (mesmo usuário em vários computadores)
+
+O Samba não limita o número de sessões de um mesmo usuário nem de conexões a um
+compartilhamento — por padrão `max connections = 0` (ilimitado). O `smb.conf.j2`
+agora declara isso de forma explícita em `[global]`:
+
+```
+max connections    = 0     # sem limite por compartilhamento (cobre 20 sessões ou mais)
+max smbd processes = 0     # sem limite de processos smbd
+```
+
+Para impor um teto, defina `samba.max_connections` em `group_vars/all.yml` (valor >= 20).
+
+**Servidor já instalado** — sem reinstalar:
+
+```bash
+sudo bash scripts/permitir_acessos_simultaneos.sh     # backup + testparm + reload sem derrubar conexões
+```
+
+**Se o erro continuar**, a causa não é limite do Samba. Rode
+`sudo bash scripts/diagnostico_acessos.sh [usuario]` (somente leitura). Causas comuns:
+
+| Sintoma | Causa | Solução |
+|---|---|---|
+| Windows: erro 1219, "mais de um nome de usuário" | O PC já está conectado ao servidor com **outro** usuário (ou como convidado) | No PC: `net use * /delete /y` e reconectar sempre com o mesmo usuário e o mesmo nome (`\\cdpni`, não alternar com o IP) |
+| "Arquivo em uso / bloqueado por <usuário>" ao abrir Excel/Word/Access | Bloqueio do **arquivo** (lock `~$`), não da pasta; o Office só permite um editor por arquivo | Abrir como somente leitura; para edição em conjunto usar o recurso de coautoria/planilha compartilhada do Office |
+| `NT_STATUS_SHARING_VIOLATION` no log | Arquivo aberto com exclusividade por outro PC | Fechar no outro PC; `smbstatus -L` mostra quem está com ele aberto |
+| `maxlogins` em `/etc/security/limits.*` | Limite de sessões por usuário no PAM | Remover a linha |

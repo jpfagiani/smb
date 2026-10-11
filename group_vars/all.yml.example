@@ -64,6 +64,9 @@ samba:
   #      como nome de GRUPO, que nunca resolve para o endereço de uma máquina.
   netbios_aliases: ["PORTAL", "PORTAL-CDPNI"]
   default_pass: "ALTERAR_NO_BOOTSTRAP"
+  # Conexões simultâneas por compartilhamento (mesmo usuário em vários PCs).
+  # 0 = sem limite (padrão). Se definir um teto, use valor >= 20.
+  max_connections: 0
   log_dir:      /var/log/samba
   # Usuários com bypass de permissão no Samba (admin users)
   # Populado dinamicamente pelo bootstrap — não editar manualmente

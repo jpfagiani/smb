@@ -47,6 +47,16 @@
     level2 oplocks       = no
     kernel oplocks       = no
     smb2 leases          = no
+
+    # Acessos simultâneos — o MESMO usuário pode abrir o MESMO compartilhamento
+    # em vários computadores ao mesmo tempo. O Samba não limita isso por padrão;
+    # os valores abaixo deixam explícito (e protegem contra um teto herdado):
+    #   max connections   0 = sem limite por compartilhamento (cobre as 20
+    #                     sessões simultâneas exigidas, e mais)
+    #   max smbd processes 0 = sem limite no total de processos smbd
+    # Para impor um teto, defina samba.max_connections (use valor >= 20).
+    max connections      = {{ samba.max_connections | default(0) }}
+    max smbd processes   = 0
     change notify        = yes
     kernel change notify = yes
 
