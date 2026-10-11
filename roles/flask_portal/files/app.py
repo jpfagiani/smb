@@ -5,7 +5,8 @@ from datetime import datetime
 
 import pam
 from flask import (Flask, render_template_string, request, session,
-                   redirect, url_for, send_file, jsonify, flash, abort)
+                   redirect, url_for, send_file, jsonify, flash, abort,
+                   Response, stream_with_context)
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
@@ -2487,6 +2488,114 @@ BACKUPS_T = BASE_T.replace("__BODY__", r"""
 <div class="card" style="margin-bottom:1rem">
   <div class="card-header"><h3>Novo Backup</h3></div>
   <div class="card-body">
+    <div class="text-muted" style="font-size:.8rem;margin-bottom:.75rem">
+      Clique em <strong>Escolher local e gerar backup</strong>, escolha a pasta
+      (pode ser um pendrive, HD externo ou uma unidade de rede mapeada) como se
+      fosse salvar um arquivo no Windows. O backup é enviado do servidor
+      direto para o seu computador, <strong>sem usar o disco do servidor</strong>
+      e sem precisar digitar IP, usuário ou senha.
+    </div>
+    <div class="form-group">
+      <label>Incluir no backup</label>
+      <div style="display:flex;flex-wrap:wrap;gap:.5rem .75rem;margin-top:.25rem">
+        <label style="font-weight:400;font-size:.83rem"><input type="checkbox" class="bkItem" value="shares" checked> Compartilhamentos (<code>{{ samba_root }}</code>)</label>
+        <label style="font-weight:400;font-size:.83rem"><input type="checkbox" class="bkItem" value="samba" checked> Configuração Samba (<code>/etc/samba</code>)</label>
+        <label style="font-weight:400;font-size:.83rem"><input type="checkbox" class="bkItem" value="sambadb" checked> Banco do Samba — senhas/SID (<code>/var/lib/samba</code>)</label>
+        <label style="font-weight:400;font-size:.83rem"><input type="checkbox" class="bkItem" value="users" checked> Usuários/Grupos (<code>/etc/passwd, shadow, group</code>)</label>
+        <label style="font-weight:400;font-size:.83rem"><input type="checkbox" class="bkItem" value="portal" checked> Portal (<code>__PORTAL_DIR__</code>)</label>
+      </div>
+    </div>
+    <button type="button" class="btn btn-primary" id="bkStreamBtn" onclick="bkStreamStart()">💾 Escolher local e gerar backup</button>
+    <div id="bkStreamBox" style="display:none;margin-top:1rem">
+      <div style="margin-bottom:.5rem">
+        <span id="bkStreamSize" style="font-family:var(--mono);font-size:1.1rem;font-weight:600">0 B</span>
+        <span class="text-muted" style="font-size:.82rem"> gravados &nbsp;·&nbsp; <span id="bkStreamTime">0s</span> decorridos</span>
+      </div>
+      <div style="background:var(--border);border-radius:4px;height:10px;overflow:hidden;margin-bottom:.75rem">
+        <div id="bkStreamBar" style="height:100%;background:var(--accent);width:100%;border-radius:4px;opacity:.6"></div>
+      </div>
+      <div id="bkStreamMsg" class="text-muted" style="font-size:.82rem;margin-bottom:.5rem">Mantenha esta página aberta até concluir. O tamanho final depende do conteúdo dos compartilhamentos.</div>
+      <button type="button" class="btn" id="bkStreamCancel" style="background:#c0392b;color:#fff;font-size:.82rem" onclick="bkStreamCancel()">✖ Cancelar</button>
+    </div>
+  </div>
+</div>
+<script>
+var bkAbort = null, bkTimer = null, bkBusy = false;
+function bkFmt(n) {
+  var u = ["B","KB","MB","GB","TB"], i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i ? n.toFixed(2) : n) + " " + u[i];
+}
+function bkItems() {
+  return Array.prototype.slice.call(document.querySelectorAll(".bkItem:checked")).map(function(e) { return e.value; });
+}
+function bkStamp() {
+  var d = new Date(), p = function(x) { return ("0" + x).slice(-2); };
+  return d.getFullYear() + p(d.getMonth()+1) + p(d.getDate()) + "_" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+}
+function bkUi(on, msg, err) {
+  bkBusy = on;
+  document.getElementById("bkStreamBtn").disabled = on;
+  document.getElementById("bkStreamBox").style.display = (on || msg) ? "block" : "none";
+  document.getElementById("bkStreamCancel").style.display = on ? "inline-block" : "none";
+  var m = document.getElementById("bkStreamMsg");
+  if (msg) { m.textContent = msg; m.style.color = err ? "#c0392b" : ""; }
+}
+function bkStreamCancel() {
+  if (bkAbort && confirm("Cancelar o backup em andamento? O arquivo parcial não será salvo.")) bkAbort.abort();
+}
+window.addEventListener("beforeunload", function(e) { if (bkBusy) { e.preventDefault(); e.returnValue = ""; } });
+async function bkStreamStart() {
+  var items = bkItems();
+  if (!items.length) { alert("Selecione ao menos um item para incluir no backup."); return; }
+  var name = "backup_" + bkStamp() + ".tar.gz";
+  var url = "{{ url_for('backup_stream') }}?name=" + encodeURIComponent(name) + "&items=" + items.join(",");
+  // Navegador sem seletor de arquivo (Firefox/Safari/HTTP): download comum
+  if (!window.showSaveFilePicker || !window.isSecureContext) {
+    alert("Este navegador não permite escolher a pasta antes do download. O backup será baixado pelo próprio navegador (pasta Downloads, ou pergunta onde salvar se estiver configurado). Para escolher a pasta, use Chrome ou Edge.");
+    window.location.href = url;
+    return;
+  }
+  var handle;
+  try {
+    handle = await window.showSaveFilePicker({
+      suggestedName: name,
+      types: [{description: "Backup do servidor (.tar.gz)", accept: {"application/gzip": [".tar.gz"]}}]
+    });
+  } catch (e) { return; }   // usuário fechou a janela
+  bkAbort = new AbortController();
+  var writable = null, got = 0, t0 = Date.now();
+  bkUi(true, "Gerando e gravando o backup...");
+  bkTimer = setInterval(function() {
+    var s = Math.floor((Date.now() - t0) / 1000);
+    document.getElementById("bkStreamTime").textContent = Math.floor(s/3600) + "h " + ("0"+Math.floor(s%3600/60)).slice(-2) + "m " + ("0"+s%60).slice(-2) + "s";
+    document.getElementById("bkStreamSize").textContent = bkFmt(got);
+  }, 500);
+  try {
+    var resp = await fetch(url, {signal: bkAbort.signal, credentials: "same-origin"});
+    if (!resp.ok) throw new Error("O servidor respondeu " + resp.status);
+    if (resp.redirected || (resp.headers.get("content-type") || "").indexOf("gzip") < 0)
+      throw new Error("Sessão expirada ou resposta inesperada — entre novamente.");
+    writable = await handle.createWritable();
+    var counter = new TransformStream({
+      transform: function(chunk, ctl) { got += chunk.byteLength; ctl.enqueue(chunk); }
+    });
+    await resp.body.pipeThrough(counter).pipeTo(writable, {signal: bkAbort.signal});
+    document.getElementById("bkStreamSize").textContent = bkFmt(got);
+    bkUi(false, "✔ Backup concluído: " + handle.name + " (" + bkFmt(got) + ").");
+  } catch (e) {
+    try { if (writable) await writable.abort(); } catch (_) {}
+    bkUi(false, (e && e.name === "AbortError") ? "Backup cancelado. Nada foi salvo." : "Falha no backup: " + e.message, true);
+  } finally {
+    clearInterval(bkTimer); bkAbort = null;
+  }
+}
+</script>
+<details style="margin-bottom:1rem">
+<summary class="text-muted" style="cursor:pointer;font-size:.82rem;margin-bottom:.5rem">Avançado: gravar direto em outra máquina da rede (informando IP, usuário e senha)</summary>
+<div class="card" style="margin-bottom:1rem">
+  <div class="card-header"><h3>Backup direto em pasta de rede (SMB)</h3></div>
+  <div class="card-body">
     <form method="post" action="{{ url_for('backup_run') }}" onsubmit="this.querySelector('[type=submit]').disabled=true;this.querySelector('[type=submit]').textContent='Aguarde...'">
       <div class="form-group">
         <label>Destino</label>
@@ -2543,6 +2652,7 @@ BACKUPS_T = BASE_T.replace("__BODY__", r"""
     </form>
   </div>
 </div>
+</details>
 <script>
 function updateSmbPreview() {
   var host  = (document.getElementById("smbHost")  || {value:""}).value;
@@ -3037,6 +3147,94 @@ def backup_run():
     except Exception as e:
         flash(f'Erro ao iniciar backup: {e}', 'error')
     return redirect(url_for('backups_page'))
+
+@app.route('/admin/backups/stream')
+@admin_required
+def backup_stream():
+    """Backup entregue por streaming ao navegador de quem clicou.
+
+    O tar|gzip sai direto para a conexão HTTP: nada é gravado no disco do
+    servidor (o disco de sistema tem 55 GB e os shares passam de 2 TB) e o
+    administrador escolhe o destino no próprio Windows (janela "Salvar
+    como"), sem informar IP/usuário/senha de compartilhamento.
+    """
+    import tempfile
+    tar = '/usr/bin/tar' if os.path.exists('/usr/bin/tar') else '/bin/tar'
+    mapa = {
+        'shares':  [SAMBA_ROOT],
+        'samba':   ['/etc/samba'],
+        'sambadb': ['/var/lib/samba'],
+        'users':   ['/etc/passwd', '/etc/shadow', '/etc/group'],
+        'portal':  [PORTAL_DIR],
+    }
+    itens = [i for i in request.args.get('items', '').split(',') if i in mapa]
+    targets = [t for i in itens for t in mapa[i]]
+    if not targets:
+        abort(400)
+    nome = secure_filename(request.args.get('name', '')) or \
+        f'backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.tar.gz'
+    if not nome.endswith('.tar.gz'):
+        nome += '.tar.gz'
+    usuario = session.get('user', '?')
+    log = '/var/log/cdpni_backup.log'
+
+    def log_msg(txt: str):
+        run(['sudo', 'tee', '-a', log], input_=txt + '\n')
+
+    # caminhos relativos + -C /: evita o aviso "Removendo '/' inicial"
+    cmd = ['sudo', tar, '-czf', '-', '-C', '/'] + [t.lstrip('/') for t in targets]
+    err = tempfile.TemporaryFile()
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err,
+                            start_new_session=True)
+    inicio = time.time()
+    log_msg(f'=== {datetime.now():%d/%m/%Y %H:%M:%S} backup por download '
+            f'({nome}) iniciado por {usuario}: {", ".join(itens)} ===')
+
+    def gerar():
+        enviado = 0
+        completo = False
+        try:
+            while True:
+                bloco = proc.stdout.read(1024 * 1024)
+                if not bloco:
+                    completo = True
+                    break
+                enviado += len(bloco)
+                yield bloco
+        finally:
+            # cliente cancelou/fechou a aba: fechar o pipe faz o tar morrer
+            # por SIGPIPE; se não morrer, derruba o grupo de processos.
+            try:
+                proc.stdout.close()
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=10)
+            except Exception:
+                run(['sudo', 'bash', '-c', f'kill -TERM -{proc.pid}'])
+                try:
+                    proc.wait(timeout=10)
+                except Exception:
+                    pass
+            err.seek(0)
+            avisos = err.read().decode('utf-8', 'replace').strip()
+            err.close()
+            seg = int(time.time() - inicio)
+            if completo and proc.returncode in (0, 1):
+                # tar sai com 1 quando um arquivo mudou durante a leitura (normal em share em uso)
+                log_msg(f'OK: backup {nome} enviado ({fmt_size(enviado)} em {seg}s)'
+                        + (f'\n{avisos[-2000:]}' if avisos else ''))
+            elif completo:
+                log_msg(f'ERRO: tar terminou com código {proc.returncode} após '
+                        f'{fmt_size(enviado)} — backup INCOMPLETO\n{avisos[-2000:]}')
+            else:
+                log_msg(f'CANCELADO: conexão encerrada após {fmt_size(enviado)} ({seg}s)')
+
+    resp = Response(stream_with_context(gerar()), mimetype='application/gzip')
+    resp.headers['Content-Disposition'] = f'attachment; filename="{nome}"'
+    resp.headers['Cache-Control'] = 'no-store'
+    resp.headers['X-Accel-Buffering'] = 'no'   # nginx: não bufferizar
+    return resp
 
 @app.route('/admin/backups/download/<filename>')
 @admin_required

@@ -19,8 +19,11 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 AmbientCapabilities=CAP_SETUID CAP_SETGID
 ExecStart={{ portal.dir }}/venv/bin/gunicorn \
     --workers 3 \
+    --worker-class gthread \
+    --threads 4 \
     --bind 127.0.0.1:{{ portal.port }} \
     --timeout 120 \
+    --graceful-timeout 30 \
     --access-logfile /var/log/{{ portal.nome | replace('-','_') }}_access.log \
     --error-logfile  /var/log/{{ portal.nome | replace('-','_') }}_error.log \
     app:app

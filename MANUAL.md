@@ -15,7 +15,7 @@ Um servidor de arquivos completo para a rede local da unidade, com:
 | **RAID** | Os dados ficam gravados em vários discos ao mesmo tempo — se um disco queimar, nada se perde |
 | **Portal Web** | Administração completa pelo navegador: `https://IP-do-servidor:8443` |
 | **Lixeira** | Todo arquivo excluído dos compartilhamentos pode ser restaurado |
-| **Backup** | Cópia dos dados para pasta local ou para outra máquina Windows da rede |
+| **Backup** | Cópia dos dados enviada ao computador do administrador (você escolhe a pasta) ou a uma pasta de rede |
 | **Firewall** | Só a rede interna acessa o servidor; proteção contra tentativas de senha |
 | **Logs de acesso** | Registro de quem abriu, renomeou ou excluiu cada arquivo |
 
@@ -186,14 +186,22 @@ Criar novos shares, definir se são restritos (por grupo) ou públicos, e editar
 
 ### 3.6 Backups e Restauração (administradores)
 
-Dois destinos:
+**Backup padrão (recomendado) — escolher o local como no Windows:**
 
-- **Local (no servidor)** — grava um `.tar.gz` numa pasta do próprio servidor;
-- **Rede Windows (SMB)** — grava direto numa pasta compartilhada de outra máquina:
-  1. Na máquina de destino (Windows): botão direito na pasta → **Propriedades → Compartilhamento → Compartilhamento Avançado** → marque "Compartilhar esta pasta" → em **Permissões**, dê "Alteração" ao seu usuário;
-  2. No portal: informe o **IP** da máquina, o **nome do compartilhamento**, usuário e senha do Windows;
-  3. **📂 Navegar** lista as pastas do destino para escolher onde gravar;
-  4. **Executar Backup** — o destino é testado antes de iniciar; qualquer problema aparece na hora, em português.
+1. Marque o que incluir e clique em **💾 Escolher local e gerar backup**;
+2. Na janela "Salvar como" do navegador, escolha a pasta (disco, pendrive, HD
+   externo ou unidade de rede mapeada) e confirme;
+3. O backup sai do servidor direto para o arquivo escolhido — **não usa o disco
+   do servidor** e não pede IP, usuário nem senha. Como você já está logado como
+   administrador, nada mais é necessário. Mantenha a aba aberta até aparecer
+   "Backup concluído"; **✖ Cancelar** descarta o arquivo parcial.
+
+Requer **Chrome ou Edge** para escolher a pasta. Em outros navegadores o arquivo
+é baixado pelo próprio navegador (pasta Downloads).
+
+**Avançado — gravar direto em outra máquina (SMB):** (menu recolhido na própria
+página) informe IP, compartilhamento, usuário e senha do Windows; **📂 Navegar**
+lista as pastas do destino; o destino é testado antes de iniciar.
 
 Marque o que incluir: arquivos dos shares, configuração do Samba, **banco do
 Samba (senhas e SID — sem ele os usuários não conseguem logar após uma
@@ -214,8 +222,8 @@ resultado do último backup.
   restaurado é validado com `testparm`; o andamento e o resultado aparecem no
   card **"Última restauração (log)"**.
 
-O backup é sempre gravado **numa pasta compartilhada da rede** — guardar no
-próprio servidor não é oferecido, porque o disco de sistema tem 55 GB e os
+O backup nunca é gravado no próprio servidor — ele é enviado ao seu computador
+(ou a uma pasta de rede), porque o disco de sistema tem 55 GB e os
 compartilhamentos passam de 2 TB: o arquivo enchia o disco e derrubava os
 serviços antes de terminar.
 

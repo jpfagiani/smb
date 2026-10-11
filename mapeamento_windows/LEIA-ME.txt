@@ -1,0 +1,51 @@
+MAPEAMENTO DE PASTAS - COMO USAR
+==================================
+
+Servidor: 10.14.29.12  (edite no topo do .bat se o IP mudar)
+
+1) Copie esta pasta para o PC (ou deixe em um compartilhamento).
+2) De dois cliques em Mapear_<SUA PASTA>.bat.
+3) Digite a senha quando pedir. A pasta vira uma unidade (Z:) em
+   Este Computador e volta sozinha a cada login.
+
+IMPORTANTE - um usuario por servidor:
+O Windows nao aceita dois usuarios DIFERENTES conectados ao mesmo
+servidor no mesmo PC (erro 1219). Por isso:
+ - PC de setor: use so o Mapear_ da pasta do setor.
+ - Quem acessa varias pastas: use Mapear_VARIAS_pastas.bat (um usuario).
+ - Trocar de usuario: rode Desconectar_pastas.bat antes.
+
+Pastas e usuarios:
+
+  Administrativo       usuario: administrativo
+  Aevp                 usuario: aevp
+  Almoxarifado         usuario: almoxarifado
+  Cadastro             usuario: cadastro
+  Canil                usuario: canil
+  Chefia_Turno_I       usuario: chefia1
+  Chefia_Turno_II      usuario: chefia2
+  Chefia_Turno_III     usuario: chefia3
+  Chefia_Turno_IV      usuario: chefia4
+  Cipa                 usuario: cipa
+  Conexao_Familiar     usuario: conexao
+  Csd                  usuario: csd
+  Educacao             usuario: educacao
+  Financas             usuario: financas
+  Inclusao             usuario: inclusao
+  Infraestrutura       usuario: infra
+  Nucleo_de_Pessoal    usuario: npessoal
+  Planilhas            usuario: planilhas
+  Portaria_Turno_I     usuario: portaria1
+  Portaria_Turno_II    usuario: portaria2
+  Portaria_Turno_III   usuario: portaria3
+  Portaria_Turno_IV    usuario: portaria4
+  Rol_de_Visitas       usuario: rol
+  Saude                usuario: saude
+  Simic                usuario: simic
+  Sindicancia          usuario: sindicancia
+  Supervisao           usuario: supervisao
+  Diretoria_Geral      usuario: dg
+  Publico              usuario: publico  (convidado: o Windows bloqueia sem usuario; use este mesmo)
+  Scanner              usuario: scanner  (convidado: o Windows bloqueia sem usuario; use este mesmo)
+  Papel_de_Parede      usuario: papel_de_parede  (convidado: o Windows bloqueia sem usuario; use este mesmo)
+  CPD                  usuario: cpd  (convidado: o Windows bloqueia sem usuario; use este mesmo)
