@@ -3649,11 +3649,22 @@ LIXEIRA_T = BASE_T.replace("__BODY__", """
     </form>
   </div>
   {% if itens %}
-  <table>
-    <thead><tr><th>Excluído em</th><th>Por</th><th>Share</th><th>Nome</th><th>Tamanho</th><th class="text-right">Ações</th></tr></thead>
+  <div id="lx-bar" style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;padding:.5rem .9rem;border-bottom:1px solid var(--border)">
+    <button type="button" class="btn btn-xs" id="lx-btn-all">☑️ Selecionar tudo</button>
+    <span class="text-muted" style="font-size:.78rem" id="lx-count">Nenhum item selecionado</span>
+    <span style="flex:1"></span>
+    <button type="button" class="btn btn-xs" id="lx-btn-rest" disabled>↩️ Restaurar selecionados</button>
+    <button type="button" class="btn btn-xs" id="lx-btn-del" disabled style="background:#c0392b;color:#fff">🗑️ Excluir selecionados</button>
+  </div>
+  <form method="post" id="lx-form" style="display:none">
+    <input type="hidden" name="voltar" value="{{ rel }}">
+  </form>
+  <table id="lx-table" style="user-select:none">
+    <thead><tr><th style="width:28px"><input type="checkbox" id="lx-all" title="Selecionar tudo"></th><th>Excluído em</th><th>Por</th><th>Share</th><th>Nome</th><th>Tamanho</th><th class="text-right">Ações</th></tr></thead>
     <tbody>
     {% for i in itens %}
     <tr>
+      <td><input type="checkbox" class="lx-chk" value="{{ i.rel }}"></td>
       <td style="font-family:var(--mono);font-size:.74rem;white-space:nowrap">{{ i.quando }}</td>
       <td style="font-size:.78rem">{{ i.usuario }}</td>
       <td style="font-size:.78rem">{{ i.share }}</td>
@@ -3690,7 +3701,9 @@ LIXEIRA_T = BASE_T.replace("__BODY__", """
   </table>
   <div style="padding:.5rem .9rem;border-top:1px solid var(--border)">
     <p class="text-muted" style="font-size:.74rem;margin:0">
-      Clique nas pastas para navegar, como no Explorer. Também acessível pelo
+      Clique nas pastas para navegar, como no Explorer. Para selecionar vários
+      itens, marque as caixas, use <b>Selecionar tudo</b> ou <b>arraste o mouse</b>
+      sobre as linhas (Ctrl soma à seleção; Shift marca um intervalo). Também acessível pelo
       Windows: \\\\{{ server_ip }}\\Recycle (somente administradores). Itens
       sem share identificado (—) são de exclusões antigas — use Baixar e
       salve manualmente no destino.
@@ -3704,6 +3717,81 @@ LIXEIRA_T = BASE_T.replace("__BODY__", """
   </div>
   {% endif %}
 </div>
+
+<style>
+#lx-table tr.lx-sel td{background:rgba(52,152,219,.18)}
+#lx-rubber{position:fixed;border:1px solid #3498db;background:rgba(52,152,219,.18);pointer-events:none;z-index:999;display:none}
+</style>
+<div id="lx-rubber"></div>
+<script>
+(function(){
+  var tbl=document.getElementById('lx-table'); if(!tbl) return;
+  var chks=[].slice.call(tbl.querySelectorAll('.lx-chk'));
+  var all=document.getElementById('lx-all'), cnt=document.getElementById('lx-count');
+  var bDel=document.getElementById('lx-btn-del'), bRest=document.getElementById('lx-btn-rest');
+  var form=document.getElementById('lx-form'), rub=document.getElementById('lx-rubber');
+  var last=null;
+  function sel(){return chks.filter(function(c){return c.checked;});}
+  function refresh(){
+    var n=sel().length;
+    chks.forEach(function(c){c.closest('tr').classList.toggle('lx-sel',c.checked);});
+    all.checked=n>0&&n===chks.length; all.indeterminate=n>0&&n<chks.length;
+    cnt.textContent=n?(n+' de '+chks.length+' selecionado'+(n>1?'s':'')):'Nenhum item selecionado';
+    bDel.disabled=bRest.disabled=!n;
+  }
+  function setAll(v){chks.forEach(function(c){c.checked=v;});refresh();}
+  all.addEventListener('change',function(){setAll(all.checked);});
+  document.getElementById('lx-btn-all').addEventListener('click',function(){setAll(sel().length!==chks.length);});
+  chks.forEach(function(c,i){
+    c.addEventListener('click',function(e){
+      if(e.shiftKey&&last!==null){
+        var a=Math.min(last,i),b=Math.max(last,i);
+        for(var k=a;k<=b;k++)chks[k].checked=c.checked;
+      }
+      last=i;refresh();
+    });
+  });
+  function submit(action,msg){
+    var s=sel(); if(!s.length) return;
+    if(!confirm(msg.replace('{n}',s.length))) return;
+    [].slice.call(form.querySelectorAll('input[name=rel]')).forEach(function(x){x.remove();});
+    s.forEach(function(c){var h=document.createElement('input');h.type='hidden';h.name='rel';h.value=c.value;form.appendChild(h);});
+    form.action=action; form.submit();
+  }
+  bDel.addEventListener('click',function(){submit("{{ url_for('lixeira_excluir_lote') }}",'Excluir DEFINITIVAMENTE {n} item(ns) selecionado(s) e todo o conteúdo? Não dá para desfazer.');});
+  bRest.addEventListener('click',function(){submit("{{ url_for('lixeira_restaurar_lote') }}",'Restaurar {n} item(ns) selecionado(s) para o local de origem?');});
+
+  // ── arrastar o mouse para selecionar (retângulo) ──
+  var drag=null, base=[];
+  var rows=[].slice.call(tbl.querySelectorAll('tbody tr'));
+  tbl.addEventListener('mousedown',function(e){
+    if(e.button!==0) return;
+    if(e.target.closest('a,button,input,form,label')) return;
+    drag={x:e.clientX,y:e.clientY,moved:false};
+    base=(e.ctrlKey||e.metaKey)?sel():[];
+  });
+  document.addEventListener('mousemove',function(e){
+    if(!drag) return;
+    var dx=e.clientX-drag.x, dy=e.clientY-drag.y;
+    if(!drag.moved&&Math.abs(dx)+Math.abs(dy)<5) return;
+    drag.moved=true;
+    var l=Math.min(e.clientX,drag.x),t=Math.min(e.clientY,drag.y),w=Math.abs(dx),h=Math.abs(dy);
+    rub.style.display='block';rub.style.left=l+'px';rub.style.top=t+'px';rub.style.width=w+'px';rub.style.height=h+'px';
+    rows.forEach(function(r){
+      var b=r.getBoundingClientRect(), c=r.querySelector('.lx-chk');
+      var hit=!(b.bottom<t||b.top>t+h||b.right<l||b.left>l+w);
+      c.checked=hit||base.indexOf(c)>-1;
+    });
+    refresh();
+    var m=60; if(e.clientY<m)window.scrollBy(0,-15); else if(e.clientY>innerHeight-m)window.scrollBy(0,15);
+  });
+  document.addEventListener('mouseup',function(){
+    if(drag&&!drag.moved&&!base.length){ /* clique simples em área vazia: não altera */ }
+    drag=null;rub.style.display='none';
+  });
+  refresh();
+})();
+</script>
 """)
 
 @app.route('/admin/lixeira')
@@ -3723,16 +3811,12 @@ def lixeira_page():
         server_ip=app.config.get('SERVER_IP', ''),
         session=session, banner=get_banner(), active='lixeira', is_admin=True)
 
-@app.route('/admin/lixeira/restaurar', methods=['POST'])
-@admin_required
-def lixeira_restaurar():
-    rel = request.form.get('rel', '')
-    voltar = request.form.get('voltar', '').strip('/')
+def _lx_restaurar_item(rel: str) -> tuple:
+    """Restaura UM item da lixeira ao share de origem. Retorna (ok, mensagem)."""
     origem = lixeira_safe(rel)
     comps = rel.replace('\\', '/').split('/')
     if not origem.exists() or len(comps) < 3:
-        flash('Item inválido ou sem share de origem identificado.', 'error')
-        return redirect(url_for('lixeira_page', p=voltar) if voltar else url_for('lixeira_page'))
+        return False, 'Item inválido ou sem share de origem identificado.'
     destino = Path(SAMBA_ROOT) / comps[1] / Path(*comps[2:])
     if origem.is_dir() and destino.is_dir():
         # A pasta já existe no share (ex.: restauração parcial anterior):
@@ -3742,20 +3826,65 @@ def lixeira_restaurar():
             f'cp -a {shlex.quote(str(origem))}/. {shlex.quote(str(destino))}/ '
             f'&& rm -rf {shlex.quote(str(origem))}'])
         if rc == 0:
-            flash(f'Conteúdo mesclado na pasta existente {destino}', 'success')
-        else:
-            flash(f'Falha ao restaurar: {err}', 'error')
-        return redirect(url_for('lixeira_page', p=voltar) if voltar else url_for('lixeira_page'))
+            return True, f'Conteúdo mesclado na pasta existente {destino}'
+        return False, f'Falha ao restaurar: {err}'
     if destino.exists():
         sufixo = datetime.now().strftime(' (restaurado %d-%m-%Y %H%M%S)')
         destino = destino.with_name(destino.stem + sufixo + destino.suffix)
     rc1, _, e1 = run(['sudo', 'mkdir', '-p', str(destino.parent)])
     rc2, _, e2 = run(['sudo', 'mv', str(origem), str(destino)])
     if rc1 == 0 and rc2 == 0:
-        flash(f'Restaurado para {destino}', 'success')
-    else:
-        flash(f'Falha ao restaurar: {e1 or e2}', 'error')
+        return True, f'Restaurado para {destino}'
+    return False, f'Falha ao restaurar: {e1 or e2}'
+
+def _lx_voltar():
+    voltar = request.form.get('voltar', '').strip('/')
     return redirect(url_for('lixeira_page', p=voltar) if voltar else url_for('lixeira_page'))
+
+@app.route('/admin/lixeira/restaurar', methods=['POST'])
+@admin_required
+def lixeira_restaurar():
+    ok, msg = _lx_restaurar_item(request.form.get('rel', ''))
+    flash(msg, 'success' if ok else 'error')
+    return _lx_voltar()
+
+@app.route('/admin/lixeira/restaurar-lote', methods=['POST'])
+@admin_required
+def lixeira_restaurar_lote():
+    rels = [r for r in request.form.getlist('rel') if r.strip('/')]
+    if not rels:
+        flash('Nenhum item selecionado.', 'error')
+        return _lx_voltar()
+    n_ok, falhas = 0, []
+    for rel in rels:
+        ok, msg = _lx_restaurar_item(rel)
+        if ok:
+            n_ok += 1
+        else:
+            falhas.append(f'{rel.split("/")[-1]}: {msg}')
+    if n_ok:
+        flash(f'{n_ok} item(ns) restaurado(s).', 'success')
+    if falhas:
+        flash('Falhas: ' + ' | '.join(falhas[:5]) + (' …' if len(falhas) > 5 else ''), 'error')
+    return _lx_voltar()
+
+@app.route('/admin/lixeira/excluir-lote', methods=['POST'])
+@admin_required
+def lixeira_excluir_lote():
+    alvos = []
+    for rel in request.form.getlist('rel'):
+        if not rel.strip('/'):
+            continue
+        alvo = lixeira_safe(rel)  # 403 se sair da lixeira
+        if alvo.exists():
+            alvos.append(str(alvo))
+    if not alvos:
+        flash('Nenhum item selecionado.', 'error')
+        return _lx_voltar()
+    rc, _, err = run(['sudo', 'rm', '-rf', '--'] + alvos)
+    flash(f'{len(alvos)} item(ns) excluído(s) definitivamente.' if rc == 0 else f'Falha: {err}',
+          'success' if rc == 0 else 'error')
+    return _lx_voltar()
 
 @app.route('/admin/lixeira/baixar')
 @admin_required
