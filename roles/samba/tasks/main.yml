@@ -2,6 +2,29 @@
 - name: Carregar variáveis do Samba
   ansible.builtin.include_vars: main.yml
 
+# Trava: sem o RAID montado, os diretórios dos shares seriam criados no disco
+# do sistema e os documentos gravados ali sumiriam quando o RAID montasse.
+- name: Verificar que {{ raid.mount }} é um ponto de montagem
+  ansible.builtin.command: mountpoint -q {{ raid.mount }}
+  changed_when: false
+
+# Limites de inotify: o smbd (root) usa um inotify por conexão para avisar o
+# Windows de arquivos novos (change notify). O padrão do Debian (128) estoura
+# com muitos PCs e as pastas deixam de atualizar até um refresh completo.
+- name: Aumentar limites de inotify (change notify do Samba)
+  ansible.posix.sysctl:
+    name: "{{ item.k }}"
+    value: "{{ item.v }}"
+    sysctl_file: /etc/sysctl.d/90-samba-inotify.conf
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    - { k: fs.inotify.max_user_instances, v: "8192" }
+    - { k: fs.inotify.max_user_watches,   v: "524288" }
+    - { k: fs.inotify.max_queued_events,  v: "65536" }
+  ignore_errors: true
+
 - name: Instalar Samba
   ansible.builtin.apt:
     name: [samba, samba-common-bin, smbclient, rsyslog]

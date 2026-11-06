@@ -42,7 +42,10 @@
     read raw             = yes
     write raw            = yes
     max xmit             = 65535
-    dead time            = 15
+    # 0 = nunca derruba sessões ociosas. Com 15, o smbd fechava a conexão
+    # após 15 min sem arquivo aberto e o Explorer ficava com a pasta
+    # desatualizada/vazia até um novo refresh.
+    dead time            = 0
     oplocks              = no
     level2 oplocks       = no
     kernel oplocks       = no

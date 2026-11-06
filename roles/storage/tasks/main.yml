@@ -296,6 +296,7 @@
           echo "$(date): em andamento — ${STATE}" >> /var/log/raid_check.log
       elif [[ "$STATE" != "clean" && "$STATE" != "active" ]]; then
           MSG+="Estado: ${STATE}. "
+      fi
       if [[ -n "$MSG" ]]; then
           echo "$MSG" | mail -s "RAID ALERT $(hostname)" root 2>/dev/null || true
           echo "$(date): $MSG" >> /var/log/raid_alert.log
@@ -326,6 +327,10 @@
     content: |
       [Unit]
       RequiresMountsFor={{ raid.mount }}
+      # Nunca sobe o smbd se {{ raid.mount }} não for um ponto de montagem
+      # real: evita gravar documentos no disco do sistema, que somem de vista
+      # quando o RAID monta por cima.
+      ConditionPathIsMountPoint={{ raid.mount }}
       After=local-fs.target
     mode: "0644"
   notify: reload systemd
